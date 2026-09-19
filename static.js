@@ -24494,13 +24494,13 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.15";
+  var BUILD = "2.16";
   var VPSCALE = !new URLSearchParams(window.location.search).has("novpscale");
   var NOINTENT = new URLSearchParams(window.location.search).has("nointent");
   var NODISTCOMP = new URLSearchParams(window.location.search).has("nodistcomp");
   {
     const q = new URLSearchParams(window.location.search);
-    setFlags({ roll: !q.has("noroll"), fastDwell: !q.has("nofastdwell"), kbtune: !q.has("nokbtune"), blinkhold: !q.has("noblinkhold"), kbhover: !q.has("nokbhover"), quadcal: !q.has("noquadcal") });
+    setFlags({ roll: !q.has("noroll"), fastDwell: !q.has("nofastdwell"), kbtune: !q.has("nokbtune"), blinkhold: !q.has("noblinkhold"), kbhover: !q.has("nokbhover"), quadcal: !q.has("noquadcal"), posenudge: !q.has("noposenudge") });
   }
   var TRIAL_COUNT = 12;
   var SCROLL_PARAS = [
@@ -24545,7 +24545,11 @@
     const [lastSummary, setLastSummary] = (0, import_react.useState)(null);
     const [trackingLost, setTrackingLost] = (0, import_react.useState)(false);
     const [distDrift, setDistDrift] = (0, import_react.useState)(false);
+    const [poseDrift, setPoseDrift] = (0, import_react.useState)(false);
     const calibFaceWRef = (0, import_react.useRef)(0);
+    const calibPoseRef = (0, import_react.useRef)(null);
+    const poseEMARef = (0, import_react.useRef)(null);
+    const calibPoseAccRef = (0, import_react.useRef)({ yaw: 0, pitch: 0, n: 0 });
     const [activeTarget, setActiveTarget] = (0, import_react.useState)(null);
     const [blinkInfo, setBlinkInfo] = (0, import_react.useState)(null);
     const [selectTargets, setSelectTargets] = (0, import_react.useState)([]);
@@ -24838,6 +24842,12 @@
             if (f) {
               calibRef.current.addSample(f, pt.x, pt.y);
               st.collected++;
+              if (poseRef.current) {
+                const acc = calibPoseAccRef.current;
+                acc.yaw += poseRef.current.yaw;
+                acc.pitch += poseRef.current.pitch;
+                acc.n++;
+              }
             }
             const prog = (now - st.t0) / 1500;
             setCalibProgress(0.2 + Math.min(1, prog) * 0.8);
@@ -24851,6 +24861,10 @@
                 if (fit) {
                   coefRef.current = { x: fit.coefX, y: fit.coefY, field: fit.residualField, quad: fit.quad, vw: window.innerWidth, vh: window.innerHeight };
                   calibFaceWRef.current = poseRef.current ? poseRef.current.faceW : 0;
+                  const acc = calibPoseAccRef.current;
+                  calibPoseRef.current = acc.n > 20 ? { yaw: acc.yaw / acc.n, pitch: acc.pitch / acc.n } : null;
+                  poseEMARef.current = null;
+                  setPoseDrift(false);
                   distCRef.current = 1;
                   biasCorrRef.current = { x: 0, y: 0 };
                   setFitError(Math.round(fit.meanResidualPx));
@@ -24925,7 +24939,17 @@
           if (sourceRef.current === "camera" && calibFaceWRef.current > 0 && modeRef.current !== "calibrate" && poseRef.current) {
             const dr = Math.abs(poseRef.current.faceW - calibFaceWRef.current) / calibFaceWRef.current;
             setDistDrift(dr > 0.15);
-          } else if (distDrift) setDistDrift(false);
+            if (FLAGS.posenudge && calibPoseRef.current) {
+              const p = poseRef.current, e = poseEMARef.current;
+              poseEMARef.current = e ? { yaw: e.yaw * 0.95 + p.yaw * 0.05, pitch: e.pitch * 0.95 + p.pitch * 0.05 } : { yaw: p.yaw, pitch: p.pitch };
+              const em = poseEMARef.current, c = calibPoseRef.current;
+              const drift = Math.abs(em.yaw - c.yaw) > 0.045 || Math.abs(em.pitch - c.pitch) > 0.05;
+              if (drift !== poseDrift) setPoseDrift(drift);
+            }
+          } else {
+            if (distDrift) setDistDrift(false);
+            if (poseDrift) setPoseDrift(false);
+          }
           const cur = cursorRef.current;
           if (cur) {
             const show = gazeRef.current.valid;
@@ -25177,6 +25201,9 @@
       sourceRef.current = src;
       calibRef.current.clear();
       coefRef.current = null;
+      calibPoseAccRef.current = { yaw: 0, pitch: 0, n: 0 };
+      calibPoseRef.current = null;
+      setPoseDrift(false);
       calibIndexRef.current = 0;
       setCalibIndex(0);
       setCalibProgress(0);
@@ -25709,7 +25736,8 @@
         mode !== "results" && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
           /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-cursor", ref: cursorRef }),
           trackingLost && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-lost", children: source === "demo" ? "Touch or move the mouse to simulate gaze" : "Tracking lost - face the camera" }),
-          !trackingLost && distDrift && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-lost", children: "Phone moved from calibration distance - hold it where you calibrated" })
+          !trackingLost && distDrift && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-lost", children: "Phone moved from calibration distance - hold it where you calibrated" }),
+          !trackingLost && !distDrift && poseDrift && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-lost", children: "Head angle changed since calibration - straighten up or tap Fix drift (6s)" })
         ] })
       ] })
     ] });
