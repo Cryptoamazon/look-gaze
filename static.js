@@ -25486,7 +25486,7 @@
           /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-typed", children: typedText || /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "gaze-typed-placeholder", children: "look at the keys to type..." }) }),
           suggestions.map((w, j) => {
             const t = kbLayoutRef.current.targets.find((tt) => tt.id === 200 + j);
-            return t ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: kbHover === 200 + j ? "gaze-chip hovered" : "gaze-chip", style: { transform: `translate3d(${t.x - 60}px, ${t.y - 28}px, 0)` }, children: w }, j) : null;
+            return t ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: kbHover === 200 + j ? "gaze-chip hovered" : "gaze-chip", style: { transform: `translate3d(${t.x}px, ${t.y}px, 0) translate(-50%, -50%)` }, children: w }, j) : null;
           }),
           kbLayoutRef.current.targets.filter((t) => t.id >= 100 && t.id < 200).map((t) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: kbHover === t.id ? "gaze-key hovered" : "gaze-key", style: { width: t.r * 1.7, height: t.r * 1.7, transform: `translate3d(${t.x - t.r * 0.85}px, ${t.y - t.r * 0.85}px, 0)` }, children: kbLayoutRef.current.labels.get(t.id) }, t.id)),
           [300, 301, 302].map((id) => {
