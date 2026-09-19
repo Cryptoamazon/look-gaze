@@ -24287,7 +24287,7 @@
   }
   var TRIAL_COUNT = 12;
   var SCROLL_PARAS = [
-    "Look is a prototype for controlling a phone with your eyes. This screen scrolls without any touch: hold your gaze near the bottom edge to move down, near the top edge to move back up. The middle of the screen is a dead zone so ordinary reading never scrolls by accident.",
+    "GLANYC is a prototype for controlling a phone with your eyes. This screen scrolls without any touch: hold your gaze near the bottom edge to move down, near the top edge to move back up. The middle of the screen is a dead zone so ordinary reading never scrolls by accident.",
     "The same pattern appears in long documents, message threads, and web pages. A gaze scroll zone works because scrolling is a continuous, low-precision action - the eyes only need to say which direction and roughly how fast.",
     "Selection is different. A wrong tap costs time, so selection uses a confirmation: dwell until the ring fills, or a deliberate long blink. Short natural blinks are filtered out by calibrating to your own blink timing.",
     "Undo is the safety net. Every action in this prototype can be reversed with a double-blink or the undo circle in the corner. A gaze interface that makes mistakes cheap to fix is one people will actually trust.",
@@ -25028,7 +25028,7 @@
       /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
         Header,
         {
-          title: "Look - gaze prototype, Phase 2.1 (accuracy iteration)",
+          title: "GLANYC - control your phone with your eyes (prototype, Phase 2.1)",
           fact: "Camera to calibrated gaze cursor with dwell, blink, undo, scrolling, and a gaze keyboard - measured honestly",
           intro: "Research prototype for eye-controlled phone input: front camera, face and iris landmarks, 9-point calibration, filtered gaze cursor, dwell-to-select with a progress ring, blink-to-select with calibrated natural-vs-intentional timing, double-blink undo, gaze scrolling zones, and a gaze keyboard with word prediction. Tests log selection accuracy, false activations per minute, time-to-select, error distance, acquisition time, and tracking confidence. Everything runs on this device - the face model is built into the page itself, and no video, gaze, or typing ever leaves the phone."
         }
