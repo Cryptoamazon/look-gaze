@@ -23859,7 +23859,7 @@
   var Closing = (p) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("footer", { className: "file-closing", children: p.children });
 
   // ../gaze-app/src/engine.ts
-  var FLAGS = { roll: true, field: true, fastDwell: true };
+  var FLAGS = { roll: true, fastDwell: true };
   function setFlags(f) {
     Object.assign(FLAGS, f);
   }
@@ -24014,25 +24014,10 @@
       if (this.samples.length < 30) return null;
       const coefX = this.solve("x", lambda);
       const coefY = this.solve("y", lambda);
-      const groups = /* @__PURE__ */ new Map();
-      for (const s of this.samples) {
-        const k = s.x + "," + s.y;
-        if (!groups.has(k)) groups.set(k, { x: s.x, y: s.y, rxs: [], rys: [] });
-        const g = groups.get(k);
-        g.rxs.push(dot(coefX, s.f) - s.x);
-        g.rys.push(dot(coefY, s.f) - s.y);
-      }
-      const mean = (a) => a.reduce((p, q) => p + q, 0) / a.length;
-      const residualField = FLAGS.field ? [...groups.values()].map((g) => ({
-        x: g.x,
-        y: g.y,
-        rx: mean(g.rxs),
-        ry: mean(g.rys)
-      })) : [];
+      const residualField = [];
       let sum = 0;
       for (const s of this.samples) {
-        const c = correctGaze(dot(coefX, s.f), dot(coefY, s.f), residualField);
-        sum += Math.hypot(c.x - s.x, c.y - s.y);
+        sum += Math.hypot(dot(coefX, s.f) - s.x, dot(coefY, s.f) - s.y);
       }
       return { coefX, coefY, meanResidualPx: sum / this.samples.length, residualField };
     }
@@ -24369,10 +24354,11 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.6";
+  var BUILD = "2.7";
+  var VPSCALE = !new URLSearchParams(window.location.search).has("novpscale");
   {
     const q = new URLSearchParams(window.location.search);
-    setFlags({ roll: !q.has("noroll"), field: !q.has("nofield"), fastDwell: !q.has("nofastdwell") });
+    setFlags({ roll: !q.has("noroll"), fastDwell: !q.has("nofastdwell") });
   }
   var TRIAL_COUNT = 12;
   var SCROLL_PARAS = [
@@ -24613,7 +24599,8 @@
         const coef2 = coefRef.current;
         if (!coef2) return { x: p.x, y: p.y, valid: true, conf: 1 };
         const est02 = predict(coef2.x, coef2.y, demoFeatures(p.x, p.y));
-        const est2 = correctGaze(est02.x, est02.y, coef2.field);
+        const estc2 = correctGaze(est02.x, est02.y, coef2.field);
+        const est2 = VPSCALE ? { x: estc2.x * window.innerWidth / (coef2.vw || window.innerWidth), y: estc2.y * window.innerHeight / (coef2.vh || window.innerHeight) } : estc2;
         const f2 = filterRef.current.filter(est2.x, est2.y, tSec);
         return { x: f2.x, y: f2.y, valid: true, conf: 0.98 };
       }
@@ -24623,7 +24610,8 @@
       const coef = coefRef.current;
       if (!coef) return null;
       const est0 = predict(coef.x, coef.y, frame.features);
-      const est = correctGaze(est0.x, est0.y, coef.field);
+      const estc = correctGaze(est0.x, est0.y, coef.field);
+      const est = VPSCALE ? { x: estc.x * window.innerWidth / (coef.vw || window.innerWidth), y: estc.y * window.innerHeight / (coef.vh || window.innerHeight) } : estc;
       const f = filterRef.current.filter(est.x, est.y, tSec);
       return { x: f.x, y: f.y, valid: true, conf: frame.confidence };
     };
@@ -24691,7 +24679,7 @@
               } else {
                 const fit = calibRef.current.fit();
                 if (fit) {
-                  coefRef.current = { x: fit.coefX, y: fit.coefY, field: fit.residualField };
+                  coefRef.current = { x: fit.coefX, y: fit.coefY, field: fit.residualField, vw: window.innerWidth, vh: window.innerHeight };
                   calibFaceWRef.current = poseRef.current ? poseRef.current.faceW : 0;
                   setFitError(Math.round(fit.meanResidualPx));
                   setBlinkInfo({ naturalMs: Math.round(blinkTrackerRef.current.naturalP95()), intentionalMs: Math.round(blinkTrackerRef.current.intentionalThresholdMs()) });
