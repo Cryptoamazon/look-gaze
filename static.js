@@ -23859,7 +23859,7 @@
   var Closing = (p) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("footer", { className: "file-closing", children: p.children });
 
   // ../gaze-app/src/engine.ts
-  var FLAGS = { roll: true, fastDwell: true };
+  var FLAGS = { roll: true, fastDwell: true, kbtune: true };
   function setFlags(f) {
     Object.assign(FLAGS, f);
   }
@@ -24255,6 +24255,15 @@
     pendingBlink = null;
     cooldownUntil = 0;
     resolver = new TargetResolver();
+    // 2.11 kbtune: switch hysteresis for dense layouts (keyboard). A challenger
+    // key must hold the hit continuously for switchHysteresisMs before it can
+    // steal an in-progress dwell ring; during the challenge the ring pauses
+    // (frozen) instead of resetting. Boundary jitter between adjacent keys was
+    // resetting the ring every few frames - "not steady enough".
+    challengeId = null;
+    challengeStart = 0;
+    frozenProg = 0;
+    static switchHysteresisMs = 140;
     setDwellMs(ms) {
       this.dwellMs = ms;
     }
@@ -24264,6 +24273,8 @@
       this.intentionalBlinkTimes = [];
       this.pendingBlink = null;
       this.cooldownUntil = 0;
+      this.challengeId = null;
+      this.frozenProg = 0;
     }
     update(gaze, targets, intentionalBlink, tMs) {
       if (intentionalBlink) {
@@ -24275,20 +24286,40 @@
           this.pendingBlink = null;
           this.cooldownUntil = tMs + this.cooldownMs;
           this.dwellTargetId = null;
-          return { intent: { kind: "undo", via: "double-blink" }, dwellTargetId: null, dwellProgress: 0, inCooldown: false };
+          return { intent: { kind: "undo", via: "double-blink" }, dwellTargetId: null, dwellProgress: 0, inCooldown: false, magPoint: null };
         }
         this.pendingBlink = t;
       }
-      const base = { intent: null, dwellTargetId: this.dwellTargetId, dwellProgress: 0, inCooldown: tMs < this.cooldownUntil };
+      const base = { intent: null, dwellTargetId: this.dwellTargetId, dwellProgress: 0, inCooldown: tMs < this.cooldownUntil, magPoint: null };
       if (base.inCooldown) return base;
       const blinkEnd = this.pendingBlink;
       this.pendingBlink = null;
       const mag = magnetize(gaze.x, gaze.y, targets, 70);
-      const hit = gaze.valid ? this.resolver.resolve(mag.x, mag.y, targets, 22) : null;
+      let hit = gaze.valid ? this.resolver.resolve(mag.x, mag.y, targets, 22) : null;
+      let challenging = false;
+      if (FLAGS.kbtune && hit && this.dwellTargetId !== null && hit.id !== this.dwellTargetId) {
+        if (this.challengeId !== hit.id) {
+          this.challengeId = hit.id;
+          this.challengeStart = tMs;
+          this.frozenProg = (tMs - this.dwellStart) / this.dwellMs;
+        }
+        if (tMs - this.challengeStart < _IntentEngine.switchHysteresisMs) {
+          hit = null;
+          challenging = true;
+        } else {
+          this.challengeId = null;
+        }
+      } else if (!challenging) {
+        this.challengeId = null;
+      }
+      if (challenging && this.dwellTargetId !== null) {
+        this.dwellStart = tMs - this.frozenProg * this.dwellMs;
+        return { intent: null, dwellTargetId: this.dwellTargetId, dwellProgress: Math.max(0, Math.min(1, this.frozenProg)), inCooldown: false, magPoint: gaze.valid ? { x: mag.x, y: mag.y } : null };
+      }
       if (blinkEnd !== null && hit) {
         this.cooldownUntil = tMs + this.cooldownMs;
         this.dwellTargetId = null;
-        return { intent: { kind: "select", targetId: hit.id, via: "blink" }, dwellTargetId: null, dwellProgress: 0, inCooldown: false };
+        return { intent: { kind: "select", targetId: hit.id, via: "blink" }, dwellTargetId: null, dwellProgress: 0, inCooldown: false, magPoint: { x: mag.x, y: mag.y } };
       }
       if (hit) this.lastHitId = hit.id, this.lastHitT = tMs;
       const effHit = hit || (this.dwellTargetId !== null && this.lastHitId === this.dwellTargetId && tMs - this.lastHitT < _IntentEngine.dwellGraceMs ? { id: this.dwellTargetId } : null);
@@ -24301,12 +24332,12 @@
         if (prog >= 1 && hit) {
           this.cooldownUntil = tMs + this.cooldownMs;
           this.dwellTargetId = null;
-          return { intent: { kind: "select", targetId: effHit.id, via: "dwell" }, dwellTargetId: null, dwellProgress: 0, inCooldown: false };
+          return { intent: { kind: "select", targetId: effHit.id, via: "dwell" }, dwellTargetId: null, dwellProgress: 0, inCooldown: false, magPoint: { x: mag.x, y: mag.y } };
         }
-        return { intent: null, dwellTargetId: effHit.id, dwellProgress: Math.max(0, Math.min(1, prog)), inCooldown: false };
+        return { intent: null, dwellTargetId: effHit.id, dwellProgress: Math.max(0, Math.min(1, prog)), inCooldown: false, magPoint: { x: mag.x, y: mag.y } };
       }
       this.dwellTargetId = null;
-      return { intent: null, dwellTargetId: null, dwellProgress: 0, inCooldown: false };
+      return { intent: null, dwellTargetId: null, dwellProgress: 0, inCooldown: false, magPoint: gaze.valid ? { x: mag.x, y: mag.y } : null };
     }
   };
   var ActionEngine = class {
@@ -24403,13 +24434,13 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.10";
+  var BUILD = "2.11";
   var VPSCALE = !new URLSearchParams(window.location.search).has("novpscale");
   var NOINTENT = new URLSearchParams(window.location.search).has("nointent");
   var NODISTCOMP = new URLSearchParams(window.location.search).has("nodistcomp");
   {
     const q = new URLSearchParams(window.location.search);
-    setFlags({ roll: !q.has("noroll"), fastDwell: !q.has("nofastdwell") });
+    setFlags({ roll: !q.has("noroll"), fastDwell: !q.has("nofastdwell"), kbtune: !q.has("nokbtune") });
   }
   var TRIAL_COUNT = 12;
   var SCROLL_PARAS = [
@@ -24508,6 +24539,8 @@
     const demoBlinkQueueRef = (0, import_react.useRef)([]);
     const selectStateRef = (0, import_react.useRef)(null);
     const kbLayoutRef = (0, import_react.useRef)({ targets: [], labels: /* @__PURE__ */ new Map() });
+    const kbSmoothRef = (0, import_react.useRef)(null);
+    const kbMagRef = (0, import_react.useRef)(null);
     const scrollPxRef = (0, import_react.useRef)(0);
     const selectTargetsRef = (0, import_react.useRef)([]);
     const scrollBodyRef = (0, import_react.useRef)(null);
@@ -24869,7 +24902,14 @@
               }
             }
           }
+          if (modeRef.current === "keyboard" && FLAGS.kbtune && gv) {
+            const p = kbSmoothRef.current;
+            kbSmoothRef.current = p ? { x: p.x + (igx - p.x) * 0.4, y: p.y + (igy - p.y) * 0.4 } : { x: igx, y: igy };
+            igx = kbSmoothRef.current.x;
+            igy = kbSmoothRef.current.y;
+          }
           const up = intentEngineRef.current.update({ x: igx, y: igy, valid: gv }, targets, intentionalBlink, now);
+          kbMagRef.current = modeRef.current === "keyboard" && FLAGS.kbtune ? up.magPoint : null;
           if (up.intent) intentLockRef.current.onSelect();
           if (up.dwellTargetId !== null && up.dwellProgress > 0) {
             const t = targets.find((tt) => tt.id === up.dwellTargetId);
@@ -24892,12 +24932,18 @@
           }
         }
         if (modeRef.current === "keyboard" && gazeRef.current.valid) {
-          const t = resolverRef.current.resolve(gazeRef.current.x, gazeRef.current.y, kbLayoutRef.current.targets, 26);
-          if (t) {
-            const mx = gazeRef.current.x + (t.x - gazeRef.current.x) * 0.45;
-            const my = gazeRef.current.y + (t.y - gazeRef.current.y) * 0.45;
+          const mp = kbMagRef.current;
+          if (FLAGS.kbtune && mp) {
             const cur = cursorRef.current;
-            if (cur) cur.style.transform = `translate3d(${mx - 11}px, ${my - 11}px, 0)`;
+            if (cur) cur.style.transform = `translate3d(${mp.x - 11}px, ${mp.y - 11}px, 0)`;
+          } else if (!FLAGS.kbtune) {
+            const t = resolverRef.current.resolve(gazeRef.current.x, gazeRef.current.y, kbLayoutRef.current.targets, 26);
+            if (t) {
+              const mx = gazeRef.current.x + (t.x - gazeRef.current.x) * 0.45;
+              const my = gazeRef.current.y + (t.y - gazeRef.current.y) * 0.45;
+              const cur = cursorRef.current;
+              if (cur) cur.style.transform = `translate3d(${mx - 11}px, ${my - 11}px, 0)`;
+            }
           }
         }
         if (modeRef.current === "trials") {
@@ -25171,6 +25217,8 @@
     };
     const startKeyboard = () => {
       intentEngineRef.current.reset();
+      kbSmoothRef.current = null;
+      kbMagRef.current = null;
       buildKeyboard();
       kbSetText("");
       setLastAction(null);
