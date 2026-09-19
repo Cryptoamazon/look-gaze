@@ -24581,7 +24581,7 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.19";
+  var BUILD = "2.19b";
   var VPSCALE = !new URLSearchParams(window.location.search).has("novpscale");
   var NOINTENT = new URLSearchParams(window.location.search).has("nointent");
   var NODISTCOMP = new URLSearchParams(window.location.search).has("nodistcomp");
@@ -24650,6 +24650,16 @@
     const [dwellVis, setDwellVis] = (0, import_react.useState)(null);
     const [copied, setCopied] = (0, import_react.useState)(false);
     const [camError, setCamError] = (0, import_react.useState)(null);
+    const [bootLog, setBootLog] = (0, import_react.useState)([]);
+    const bootSeenRef = (0, import_react.useRef)({});
+    const blog = (0, import_react.useCallback)((msg) => {
+      setBootLog((prev) => [...prev.slice(-9), `${(performance.now() / 1e3).toFixed(1)}s ${msg}`]);
+    }, []);
+    const blogOnce = (0, import_react.useCallback)((key, msg) => {
+      if (bootSeenRef.current[key]) return;
+      bootSeenRef.current[key] = true;
+      blog(msg);
+    }, [blog]);
     const overlayRef = (0, import_react.useRef)(null);
     const cursorRef = (0, import_react.useRef)(null);
     const targetRef = (0, import_react.useRef)(null);
@@ -24870,16 +24880,6 @@
         window.removeEventListener("unhandledrejection", onRej);
       };
     }, []);
-    const [bootLog, setBootLog] = (0, import_react.useState)([]);
-    const bootSeenRef = (0, import_react.useRef)({});
-    const blog = (0, import_react.useCallback)((msg) => {
-      setBootLog((prev) => [...prev.slice(-9), `${(performance.now() / 1e3).toFixed(1)}s ${msg}`]);
-    }, []);
-    const blogOnce = (0, import_react.useCallback)((key, msg) => {
-      if (bootSeenRef.current[key]) return;
-      bootSeenRef.current[key] = true;
-      blog(msg);
-    }, [blog]);
     (0, import_react.useEffect)(() => {
       blog(`boot v${BUILD} hd=${FLAGS.hdtrack ? "on" : "off"} scr=${window.innerWidth}x${window.innerHeight}`);
       const ua = navigator.userAgent.match(/\(([^)]*)\)/)?.[1] || navigator.userAgent;
