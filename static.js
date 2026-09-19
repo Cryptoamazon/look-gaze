@@ -24122,6 +24122,55 @@
       };
     }
   };
+  var IntentLock = class {
+    pts = [];
+    lock = { targetId: null, until: 0, cx: 0, cy: 0 };
+    cooldownUntil = 0;
+    reset() {
+      this.pts = [];
+      this.lock = { targetId: null, until: 0, cx: 0, cy: 0 };
+      this.cooldownUntil = 0;
+    }
+    // Feed every valid filtered gaze point. Returns the active lock (or none).
+    update(x, y, tMs, targets) {
+      if (this.lock.targetId !== null && tMs > this.lock.until) this.lock = { targetId: null, until: 0, cx: 0, cy: 0 };
+      const last = this.pts[this.pts.length - 1];
+      if (last && Math.hypot(x - last.x, y - last.y) > 90) this.pts = [];
+      this.pts.push({ x, y, t: tMs });
+      while (this.pts.length && tMs - this.pts[0].t > 400) this.pts.shift();
+      if (this.lock.targetId !== null || tMs < this.cooldownUntil) return this.lock;
+      if (this.pts.length < 4) return this.lock;
+      const span = tMs - this.pts[0].t;
+      if (span < 120) return this.lock;
+      const cx = this.pts.reduce((s, p) => s + p.x, 0) / this.pts.length;
+      const cy = this.pts.reduce((s, p) => s + p.y, 0) / this.pts.length;
+      const maxDev = Math.max(...this.pts.map((p) => Math.hypot(p.x - cx, p.y - cy)));
+      if (maxDev > 45) return this.lock;
+      const R = 150;
+      let best = null, bestD = Infinity, secondD = Infinity;
+      for (const t of targets) {
+        const d2 = Math.hypot(t.x - cx, t.y - cy);
+        if (d2 > R + t.r) continue;
+        if (d2 < bestD) {
+          secondD = bestD;
+          bestD = d2;
+          best = t;
+        } else if (d2 < secondD) secondD = d2;
+      }
+      if (!best) return this.lock;
+      if (secondD - bestD < 35) return this.lock;
+      this.lock = { targetId: best.id, until: tMs + 700, cx, cy };
+      return this.lock;
+    }
+    // Wide capture radius for the locked target during the lock window.
+    captureRadius(targetId, tMs) {
+      return this.lock.targetId === targetId && tMs <= this.lock.until ? 170 : null;
+    }
+    onSelect() {
+      this.cooldownUntil = performance.now() + 500;
+      this.reset();
+    }
+  };
   function magnetize(x, y, targets, capturePx = 90) {
     let best = null, bestD = Infinity;
     for (const t of targets) {
@@ -24354,8 +24403,9 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.7";
+  var BUILD = "2.8";
   var VPSCALE = !new URLSearchParams(window.location.search).has("novpscale");
+  var NOINTENT = new URLSearchParams(window.location.search).has("nointent");
   {
     const q = new URLSearchParams(window.location.search);
     setFlags({ roll: !q.has("noroll"), fastDwell: !q.has("nofastdwell") });
@@ -24440,6 +24490,7 @@
     const dwellPtsRef = (0, import_react.useRef)([]);
     const blinkTrackerRef = (0, import_react.useRef)(new BlinkTracker());
     const intentEngineRef = (0, import_react.useRef)(new IntentEngine());
+    const intentLockRef = (0, import_react.useRef)(new IntentLock());
     const actionEngineRef = (0, import_react.useRef)(new ActionEngine());
     const demoBlinkStartRef = (0, import_react.useRef)(null);
     const demoBlinkQueueRef = (0, import_react.useRef)([]);
@@ -24458,6 +24509,9 @@
     const trialStateRef = (0, import_react.useRef)({ target: null, t0: 0, dwellT0: null, total: 0, valid: 0, minDist: Infinity, records: [], idx: 0, betweenT: null, confSum: 0, lastHitT: 0 });
     (0, import_react.useEffect)(() => {
       modeRef.current = mode;
+    }, [mode]);
+    (0, import_react.useEffect)(() => {
+      intentLockRef.current.reset();
     }, [mode]);
     (0, import_react.useEffect)(() => {
       typedTextRef.current = typedText;
@@ -24709,7 +24763,8 @@
             const show = gazeRef.current.valid;
             let cx = gazeRef.current.x, cy = gazeRef.current.y;
             if (modeRef.current === "trials" && trialStateRef.current.target) {
-              const m0 = magnetize(cx, cy, [trialStateRef.current.target], 90);
+              const cap = NOINTENT ? 90 : intentLockRef.current.captureRadius(trialStateRef.current.target.id, now) || 90;
+              const m0 = magnetize(cx, cy, [trialStateRef.current.target], cap);
               cx = m0.x;
               cy = m0.y;
             }
@@ -24729,7 +24784,20 @@
           let gv = gazeRef.current.valid;
           if (intentionalBlink && !gv && now - gazeRef.current.lastValidT < 450) gv = true;
           const targets = modeRef.current === "select" ? selectTargetsRef.current : kbLayoutRef.current.targets;
-          const up = intentEngineRef.current.update({ x: gazeRef.current.x, y: gazeRef.current.y, valid: gv }, targets, intentionalBlink, now);
+          let igx = gazeRef.current.x, igy = gazeRef.current.y;
+          if (!NOINTENT && gv) {
+            const st = intentLockRef.current.update(igx, igy, now, targets);
+            if (st.targetId !== null) {
+              const lt = targets.find((tt) => tt.id === st.targetId);
+              if (lt) {
+                const m = magnetize(igx, igy, [lt], 170);
+                igx = m.x;
+                igy = m.y;
+              }
+            }
+          }
+          const up = intentEngineRef.current.update({ x: igx, y: igy, valid: gv }, targets, intentionalBlink, now);
+          if (up.intent) intentLockRef.current.onSelect();
           if (up.dwellTargetId !== null && up.dwellProgress > 0) {
             const t = targets.find((tt) => tt.id === up.dwellTargetId);
             setDwellVis(t ? { x: t.x, y: t.y, r: t.r, p: up.dwellProgress } : null);
@@ -24773,7 +24841,9 @@
             const gx = gazeRef.current.x, gy = gazeRef.current.y;
             if (gazeRef.current.valid) {
               ts.valid++;
-              const mg = magnetize(gx, gy, [ts.target], 90);
+              if (!NOINTENT) intentLockRef.current.update(gx, gy, now, [ts.target]);
+              const cap = NOINTENT ? 90 : intentLockRef.current.captureRadius(ts.target.id, now) || 90;
+              const mg = magnetize(gx, gy, [ts.target], cap);
               const hit = resolverRef.current.resolve(mg.x, mg.y, [ts.target], HIT_SLACK);
               const dist = Math.hypot(gx - ts.target.x, gy - ts.target.y);
               if (dist < ts.minDist) ts.minDist = dist;
@@ -24904,7 +24974,7 @@
         when: (/* @__PURE__ */ new Date()).toISOString(),
         avgFps: fpsRef.current.avg,
         build: BUILD,
-        flags: { ...FLAGS }
+        flags: { ...FLAGS, intent: !NOINTENT, vpscale: VPSCALE }
       };
     };
     const begin = async (src) => {
