@@ -335,3 +335,20 @@ button.gaze-link {
   padding: 0;
   cursor: pointer;
 }
+
+/* 2.13: instant gaze-hover feedback (Vision Pro style) */
+.gaze-key, .gaze-chip {
+  transition: background 80ms ease-out, box-shadow 80ms ease-out, border-color 80ms ease-out;
+}
+.gaze-key.hovered {
+  background: rgba(79, 124, 255, 0.45);
+  border-color: #8fb0ff;
+  box-shadow: 0 0 14px rgba(79, 124, 255, 0.55);
+}
+.gaze-key.util.hovered {
+  background: rgba(79, 124, 255, 0.35);
+}
+.gaze-chip.hovered {
+  background: rgba(79, 124, 255, 0.5);
+  box-shadow: 0 0 16px rgba(79, 124, 255, 0.6);
+}

@@ -23859,7 +23859,7 @@
   var Closing = (p) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("footer", { className: "file-closing", children: p.children });
 
   // ../gaze-app/src/engine.ts
-  var FLAGS = { roll: true, fastDwell: true, kbtune: true, blinkhold: true };
+  var FLAGS = { roll: true, fastDwell: true, kbtune: true, blinkhold: true, kbhover: true };
   function setFlags(f) {
     Object.assign(FLAGS, f);
   }
@@ -24440,13 +24440,13 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.12";
+  var BUILD = "2.13";
   var VPSCALE = !new URLSearchParams(window.location.search).has("novpscale");
   var NOINTENT = new URLSearchParams(window.location.search).has("nointent");
   var NODISTCOMP = new URLSearchParams(window.location.search).has("nodistcomp");
   {
     const q = new URLSearchParams(window.location.search);
-    setFlags({ roll: !q.has("noroll"), fastDwell: !q.has("nofastdwell"), kbtune: !q.has("nokbtune"), blinkhold: !q.has("noblinkhold") });
+    setFlags({ roll: !q.has("noroll"), fastDwell: !q.has("nofastdwell"), kbtune: !q.has("nokbtune"), blinkhold: !q.has("noblinkhold"), kbhover: !q.has("nokbhover") });
   }
   var TRIAL_COUNT = 12;
   var SCROLL_PARAS = [
@@ -24546,6 +24546,8 @@
     const selectStateRef = (0, import_react.useRef)(null);
     const kbLayoutRef = (0, import_react.useRef)({ targets: [], labels: /* @__PURE__ */ new Map() });
     const kbSmoothRef = (0, import_react.useRef)(null);
+    const kbHoverRef = (0, import_react.useRef)(null);
+    const [kbHover, setKbHover] = (0, import_react.useState)(null);
     const kbMagRef = (0, import_react.useRef)(null);
     const scrollPxRef = (0, import_react.useRef)(0);
     const selectTargetsRef = (0, import_react.useRef)([]);
@@ -24921,6 +24923,15 @@
           }
           const up = intentEngineRef.current.update({ x: igx, y: igy, valid: gv }, targets, intentionalBlink, now);
           kbMagRef.current = modeRef.current === "keyboard" && FLAGS.kbtune ? up.magPoint : null;
+          if (modeRef.current === "keyboard" && FLAGS.kbhover) {
+            const hp = kbMagRef.current || (gv ? { x: igx, y: igy } : null);
+            const ht = hp && gv ? resolverRef.current.resolve(hp.x, hp.y, kbLayoutRef.current.targets, 22) : null;
+            const hid = ht ? ht.id : null;
+            if (hid !== kbHoverRef.current) {
+              kbHoverRef.current = hid;
+              setKbHover(hid);
+            }
+          }
           if (up.intent) intentLockRef.current.onSelect();
           if (up.dwellTargetId !== null && up.dwellProgress > 0) {
             const t = targets.find((tt) => tt.id === up.dwellTargetId);
@@ -25230,6 +25241,8 @@
       intentEngineRef.current.reset();
       kbSmoothRef.current = null;
       kbMagRef.current = null;
+      kbHoverRef.current = null;
+      setKbHover(null);
       buildKeyboard();
       kbSetText("");
       setLastAction(null);
@@ -25473,12 +25486,12 @@
           /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-typed", children: typedText || /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "gaze-typed-placeholder", children: "look at the keys to type..." }) }),
           suggestions.map((w, j) => {
             const t = kbLayoutRef.current.targets.find((tt) => tt.id === 200 + j);
-            return t ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-chip", style: { transform: `translate3d(${t.x - 52}px, ${t.y - 22}px, 0)` }, children: w }, j) : null;
+            return t ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: kbHover === 200 + j ? "gaze-chip hovered" : "gaze-chip", style: { transform: `translate3d(${t.x - 52}px, ${t.y - 22}px, 0)` }, children: w }, j) : null;
           }),
-          kbLayoutRef.current.targets.filter((t) => t.id >= 100 && t.id < 200).map((t) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-key", style: { width: t.r * 1.7, height: t.r * 1.7, transform: `translate3d(${t.x - t.r * 0.85}px, ${t.y - t.r * 0.85}px, 0)` }, children: kbLayoutRef.current.labels.get(t.id) }, t.id)),
+          kbLayoutRef.current.targets.filter((t) => t.id >= 100 && t.id < 200).map((t) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: kbHover === t.id ? "gaze-key hovered" : "gaze-key", style: { width: t.r * 1.7, height: t.r * 1.7, transform: `translate3d(${t.x - t.r * 0.85}px, ${t.y - t.r * 0.85}px, 0)` }, children: kbLayoutRef.current.labels.get(t.id) }, t.id)),
           [300, 301, 302].map((id) => {
             const t = kbLayoutRef.current.targets.find((tt) => tt.id === id);
-            return t ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-key util", style: { width: t.r * (id === 301 ? 4 : 2.2), height: t.r * 1.6, transform: `translate3d(${t.x - t.r * (id === 301 ? 2 : 1.1)}px, ${t.y - t.r * 0.8}px, 0)` }, children: kbLayoutRef.current.labels.get(id) }, id) : null;
+            return t ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: kbHover === id ? "gaze-key util hovered" : "gaze-key util", style: { width: t.r * (id === 301 ? 4 : 2.2), height: t.r * 1.6, transform: `translate3d(${t.x - t.r * (id === 301 ? 2 : 1.1)}px, ${t.y - t.r * 0.8}px, 0)` }, children: kbLayoutRef.current.labels.get(id) }, id) : null;
           }),
           /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-undo", style: { transform: "translate3d(14px, 18px, 0)" }, children: "undo" })
         ] }),
