@@ -24581,7 +24581,7 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.18";
+  var BUILD = "2.19";
   var VPSCALE = !new URLSearchParams(window.location.search).has("novpscale");
   var NOINTENT = new URLSearchParams(window.location.search).has("nointent");
   var NODISTCOMP = new URLSearchParams(window.location.search).has("nodistcomp");
@@ -24710,6 +24710,7 @@
     const typedTextRef = (0, import_react.useRef)("");
     const suggestionsRef = (0, import_react.useRef)([]);
     const demoMapRef = (0, import_react.useRef)(null);
+    const blogOnceRef = (0, import_react.useRef)(() => void 0);
     const calibIndexRef = (0, import_react.useRef)(0);
     const calibStateRef = (0, import_react.useRef)({ phase: "settle", t0: 0, collected: 0 });
     const trialStateRef = (0, import_react.useRef)({ target: null, t0: 0, dwellT0: null, total: 0, valid: 0, minDist: Infinity, records: [], idx: 0, betweenT: null, confSum: 0, lastHitT: 0 });
@@ -24728,6 +24729,9 @@
     (0, import_react.useEffect)(() => {
       dwellVisRef.current = dwellVis;
     }, [dwellVis]);
+    (0, import_react.useEffect)(() => {
+      blogOnceRef.current = blogOnce;
+    }, [blogOnce]);
     (0, import_react.useEffect)(() => {
       window.__gaze = {
         async selfTest() {
@@ -24797,6 +24801,7 @@
     const startCamera = (0, import_react.useCallback)(async () => {
       setCamError(null);
       setStatusLine("Starting camera...");
+      blog("cam: requesting...");
       try {
         if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera API unavailable in this browser.");
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -24804,15 +24809,21 @@
           audio: false
         });
         streamRef.current = stream;
+        const ts = stream.getVideoTracks()[0]?.getSettings?.() || {};
+        blog(`cam: live ${ts.width || "?"}x${ts.height || "?"}@${Math.round(ts.frameRate || 0)}`);
         const v = videoRef.current;
         if (v) {
           v.srcObject = stream;
-          await v.play().catch(() => void 0);
+          const playErr = await v.play().then(() => null).catch((e) => String(e?.message || e));
+          blog(playErr ? `video: play() FAILED ${playErr.slice(0, 60)}` : "video: playing");
           if (v.videoWidth) setFrameAspect(v.videoWidth, v.videoHeight);
           else v.addEventListener("loadedmetadata", () => setFrameAspect(v.videoWidth, v.videoHeight), { once: true });
+        } else {
+          blog("video: element not mounted yet");
         }
         setStatusLine("Loading face model...");
         await loadScript(mpFiles()["face_mesh.js"]);
+        blog("model: script loaded");
         const FM = window.FaceMesh;
         if (!FM) throw new Error("Face model failed to initialize.");
         const files = mpFiles();
@@ -24821,22 +24832,29 @@
         fm.onResults((res) => {
           const lm = res?.multiFaceLandmarks?.[0];
           latestLmRef.current = lm ? lm : null;
+          blogOnce("res1", `mesh: first result, face=${lm ? "YES" : "no"}`);
         });
+        if (typeof fm.initialize === "function") {
+          await fm.initialize();
+          blog("model: initialized");
+        }
         faceMeshRef.current = fm;
         runningRef.current = true;
         setStatusLine("");
+        blog("cam: running");
         return true;
       } catch (e) {
+        blog(`cam: FAILED ${String(e?.message || e).slice(0, 80)}`);
         setCamError(e?.message || "Camera failed to start.");
         stopCamera();
         return false;
       }
-    }, [stopCamera]);
+    }, [stopCamera, blog, blogOnce]);
     (0, import_react.useEffect)(() => {
       const v = videoRef.current;
       if (v && streamRef.current && v.srcObject !== streamRef.current) {
         v.srcObject = streamRef.current;
-        v.play().catch(() => void 0);
+        v.play().then(() => blogOnce("attachplay", "video: playing (late mount)")).catch((e) => blogOnce("attachplayfail", `video: late play() FAILED ${String(e?.message || e).slice(0, 60)}`));
         if (v.videoWidth) setFrameAspect(v.videoWidth, v.videoHeight);
         else v.addEventListener("loadedmetadata", () => setFrameAspect(v.videoWidth, v.videoHeight), { once: true });
       }
@@ -24852,6 +24870,21 @@
         window.removeEventListener("unhandledrejection", onRej);
       };
     }, []);
+    const [bootLog, setBootLog] = (0, import_react.useState)([]);
+    const bootSeenRef = (0, import_react.useRef)({});
+    const blog = (0, import_react.useCallback)((msg) => {
+      setBootLog((prev) => [...prev.slice(-9), `${(performance.now() / 1e3).toFixed(1)}s ${msg}`]);
+    }, []);
+    const blogOnce = (0, import_react.useCallback)((key, msg) => {
+      if (bootSeenRef.current[key]) return;
+      bootSeenRef.current[key] = true;
+      blog(msg);
+    }, [blog]);
+    (0, import_react.useEffect)(() => {
+      blog(`boot v${BUILD} hd=${FLAGS.hdtrack ? "on" : "off"} scr=${window.innerWidth}x${window.innerHeight}`);
+      const ua = navigator.userAgent.match(/\(([^)]*)\)/)?.[1] || navigator.userAgent;
+      blog(ua.slice(0, 64));
+    }, [blog]);
     const ensureDemoMap = () => {
       if (demoMapRef.current) return demoMapRef.current;
       const rand = () => Math.random() * 2 - 1;
@@ -24904,6 +24937,7 @@
       estRawHistRef.current.push({ x: est.x, y: est.y, t: tSec });
       if (estRawHistRef.current.length > 60) estRawHistRef.current.shift();
       if (FLAGS.autocal) est = autocalRef.current.correct(est.x, est.y);
+      blogOnceRef.current("gaze1", `gaze: first point (${Math.round(est.x)},${Math.round(est.y)})`);
       const f = filterRef.current.filter(est.x, est.y, tSec);
       return { x: f.x, y: f.y, valid: true, conf: frame.confidence };
     };
@@ -24936,7 +24970,9 @@
             lastSend = now;
             try {
               await faceMeshRef.current.send({ image: v });
-            } catch {
+              blogOnceRef.current("send1", "mesh: first frame sent");
+            } catch (e) {
+              blogOnceRef.current("senderr", `mesh: send FAILED ${String(e?.message || e).slice(0, 80)}`);
             }
           }
         }
@@ -25652,7 +25688,8 @@
         fatalErr && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("p", { className: "gaze-error", children: [
           "Error: ",
           fatalErr
-        ] })
+        ] }),
+        bootLog.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: { marginTop: 8, fontFamily: "monospace", fontSize: 10, lineHeight: 1.4, opacity: 0.75, textAlign: "left" }, children: bootLog.map((l, i) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { children: l }, i)) })
       ] }) }),
       lastSummary && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Group, { label: "Last run", heading: true, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Facts, { items: [
         { label: "Targets hit", value: `${Math.round(lastSummary.hitRate * 100)}% of ${lastSummary.trials}` },
@@ -25672,6 +25709,7 @@
           "v",
           BUILD
         ] }),
+        bootLog.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: { position: "absolute", left: 6, bottom: 18, fontSize: 10, fontFamily: "monospace", lineHeight: 1.4, color: "#fff", opacity: 0.85, pointerEvents: "none", textShadow: "0 1px 2px #000", zIndex: 60 }, children: bootLog.map((l, i) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { children: l }, i)) }),
         fatalErr && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "gaze-error", style: { position: "absolute", top: 44, left: 8, right: 8, zIndex: 50 }, children: [
           "Error: ",
           fatalErr
