@@ -24581,7 +24581,7 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.17b";
+  var BUILD = "2.17c";
   var VPSCALE = !new URLSearchParams(window.location.search).has("novpscale");
   var NOINTENT = new URLSearchParams(window.location.search).has("nointent");
   var NODISTCOMP = new URLSearchParams(window.location.search).has("nodistcomp");
@@ -25539,11 +25539,11 @@
     };
     const buildPriorCoef = () => {
       const W = window.innerWidth, H = window.innerHeight;
-      const coefX = new Array(16).fill(0);
+      const coefX = new Array(15).fill(0);
       coefX[0] = -0.167 * W;
       coefX[1] = 0.667 * W;
       coefX[3] = 0.667 * W;
-      const coefY = new Array(16).fill(0);
+      const coefY = new Array(15).fill(0);
       coefY[0] = 0.5 * H;
       coefY[2] = 1.2 * H;
       coefY[4] = 1.2 * H;
@@ -25569,6 +25569,7 @@
       kbSetText("");
       setLastAction(null);
       setMode("keyboard");
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       const ok = await startCamera();
       if (!ok) setMode("intro");
     };
