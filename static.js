@@ -23859,7 +23859,7 @@
   var Closing = (p) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("footer", { className: "file-closing", children: p.children });
 
   // ../gaze-app/src/engine.ts
-  var FLAGS = { roll: true, fastDwell: true, kbtune: true, blinkhold: true, kbhover: true };
+  var FLAGS = { roll: true, fastDwell: true, kbtune: true, blinkhold: true, kbhover: true, quadcal: true };
   function setFlags(f) {
     Object.assign(FLAGS, f);
   }
@@ -24015,14 +24015,68 @@
       const coefX = this.solve("x", lambda);
       const coefY = this.solve("y", lambda);
       const residualField = [];
+      let quad = null;
+      if (FLAGS.quadcal) {
+        const groups = /* @__PURE__ */ new Map();
+        for (const s of this.samples) {
+          const k = s.x + "," + s.y;
+          if (!groups.has(k)) groups.set(k, { px: s.x, py: s.y, rxs: [], rys: [] });
+          const g = groups.get(k);
+          g.rxs.push(dot(coefX, s.f) - s.x);
+          g.rys.push(dot(coefY, s.f) - s.y);
+        }
+        const pts = [...groups.values()];
+        if (pts.length >= 7) {
+          const mean = (a) => a.reduce((p, q) => p + q, 0) / a.length;
+          const cx = mean(pts.map((p) => p.px)), cy = mean(pts.map((p) => p.py));
+          const sx = Math.max(60, Math.max(...pts.map((p) => Math.abs(p.px - cx))));
+          const sy = Math.max(60, Math.max(...pts.map((p) => Math.abs(p.py - cy))));
+          const T = (px, py) => {
+            const xn = (px - cx) / sx, yn = (py - cy) / sy;
+            return [1, xn, yn, xn * xn, xn * yn, yn * yn];
+          };
+          const solveQ = (get) => {
+            const A = Array.from({ length: 6 }, () => new Array(7).fill(0));
+            for (const p of pts) {
+              const t = T(p.px, p.py), r = mean(get(p));
+              for (let i = 0; i < 6; i++) {
+                for (let j = 0; j < 6; j++) A[i][j] += t[i] * t[j];
+                A[i][6] += t[i] * r;
+              }
+            }
+            for (let i = 0; i < 6; i++) A[i][i] += 1e-3;
+            for (let col = 0; col < 6; col++) {
+              let piv = col;
+              for (let r = col + 1; r < 6; r++) if (Math.abs(A[r][col]) > Math.abs(A[piv][col])) piv = r;
+              [A[col], A[piv]] = [A[piv], A[col]];
+              const div = A[col][col] || 1e-9;
+              for (let j = col; j <= 6; j++) A[col][j] /= div;
+              for (let r = 0; r < 6; r++) {
+                if (r === col) continue;
+                const f2 = A[r][col];
+                for (let j = col; j <= 6; j++) A[r][j] -= f2 * A[col][j];
+              }
+            }
+            return A.map((row) => row[6]);
+          };
+          quad = { cx, sx, cy, sy, ax: solveQ((p) => p.rxs), ay: solveQ((p) => p.rys) };
+        }
+      }
       let sum = 0;
       for (const s of this.samples) {
         sum += Math.hypot(dot(coefX, s.f) - s.x, dot(coefY, s.f) - s.y);
       }
-      return { coefX, coefY, meanResidualPx: sum / this.samples.length, residualField };
+      return { coefX, coefY, meanResidualPx: sum / this.samples.length, residualField, quad };
     }
   };
-  function correctGaze(x, y, field) {
+  function correctGaze(x, y, field, quad) {
+    if (quad) {
+      const xn = (x - quad.cx) / quad.sx, yn = (y - quad.cy) / quad.sy;
+      const t = [1, xn, yn, xn * xn, xn * yn, yn * yn];
+      const clamp = (v) => Math.max(-120, Math.min(120, v));
+      x -= clamp(dot(quad.ax, t));
+      y -= clamp(dot(quad.ay, t));
+    }
     if (!field || field.length === 0) return { x, y };
     let wx = 0, wy = 0, wsum = 0;
     for (const p of field) {
@@ -24440,13 +24494,13 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.14";
+  var BUILD = "2.15";
   var VPSCALE = !new URLSearchParams(window.location.search).has("novpscale");
   var NOINTENT = new URLSearchParams(window.location.search).has("nointent");
   var NODISTCOMP = new URLSearchParams(window.location.search).has("nodistcomp");
   {
     const q = new URLSearchParams(window.location.search);
-    setFlags({ roll: !q.has("noroll"), fastDwell: !q.has("nofastdwell"), kbtune: !q.has("nokbtune"), blinkhold: !q.has("noblinkhold"), kbhover: !q.has("nokbhover") });
+    setFlags({ roll: !q.has("noroll"), fastDwell: !q.has("nofastdwell"), kbtune: !q.has("nokbtune"), blinkhold: !q.has("noblinkhold"), kbhover: !q.has("nokbhover"), quadcal: !q.has("noquadcal") });
   }
   var TRIAL_COUNT = 12;
   var SCROLL_PARAS = [
@@ -24706,7 +24760,7 @@
         const coef2 = coefRef.current;
         if (!coef2) return { x: p.x, y: p.y, valid: true, conf: 1 };
         const est02 = predict(coef2.x, coef2.y, demoFeatures(p.x, p.y));
-        const estc2 = correctGaze(est02.x, est02.y, coef2.field);
+        const estc2 = correctGaze(est02.x, est02.y, coef2.field, coef2.quad);
         const est2 = VPSCALE ? { x: estc2.x * window.innerWidth / (coef2.vw || window.innerWidth), y: estc2.y * window.innerHeight / (coef2.vh || window.innerHeight) } : estc2;
         const f2 = filterRef.current.filter(est2.x, est2.y, tSec);
         return { x: f2.x, y: f2.y, valid: true, conf: 0.98 };
@@ -24717,7 +24771,7 @@
       const coef = coefRef.current;
       if (!coef) return null;
       const est0 = predict(coef.x, coef.y, frame.features);
-      const estc = correctGaze(est0.x, est0.y, coef.field);
+      const estc = correctGaze(est0.x, est0.y, coef.field, coef.quad);
       let est = VPSCALE ? { x: estc.x * window.innerWidth / (coef.vw || window.innerWidth), y: estc.y * window.innerHeight / (coef.vh || window.innerHeight) } : estc;
       if (!NODISTCOMP && calibFaceWRef.current > 0 && frame.pose && frame.pose.faceW > 0) {
         distCRef.current = distCRef.current * 0.95 + calibFaceWRef.current / frame.pose.faceW * 0.05;
@@ -24795,7 +24849,7 @@
               } else {
                 const fit = calibRef.current.fit();
                 if (fit) {
-                  coefRef.current = { x: fit.coefX, y: fit.coefY, field: fit.residualField, vw: window.innerWidth, vh: window.innerHeight };
+                  coefRef.current = { x: fit.coefX, y: fit.coefY, field: fit.residualField, quad: fit.quad, vw: window.innerWidth, vh: window.innerHeight };
                   calibFaceWRef.current = poseRef.current ? poseRef.current.faceW : 0;
                   distCRef.current = 1;
                   biasCorrRef.current = { x: 0, y: 0 };
