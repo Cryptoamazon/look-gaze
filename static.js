@@ -23896,7 +23896,11 @@
     const faceH = d(forehead, chin) || 1e-6;
     const yaw = (nose.x - (cheekL.x + cheekR.x) / 2) / faceW;
     const pitch = (nose.y - (forehead.y + chin.y) / 2) / faceH;
-    const confidence = Math.max(0, Math.min(1, 1 - Math.abs(earL - earR) * 4));
+    const sym = 1 - Math.abs(earL - earR) * 4;
+    const poseMag = Math.max(Math.abs(yaw), Math.abs(pitch));
+    const poseScore = Math.max(0, 1 - Math.max(0, poseMag - 0.05) * 6);
+    const sizeScore = Math.max(0, Math.min(1, (faceW - 0.12) / 0.2));
+    const confidence = Math.max(0, Math.min(1, sym * 0.4 + poseScore * 0.35 + sizeScore * 0.25));
     const pose = { yaw, pitch, faceW };
     const features = [
       1,
@@ -23954,7 +23958,34 @@
       }
       return A.map((row) => row[n]);
     }
+    // Drop samples that are far from their own calibration point's median
+    // features (blinks, saccades mid-dwell, head movement) before fitting.
+    rejectOutliers() {
+      const groups = /* @__PURE__ */ new Map();
+      for (const s of this.samples) {
+        const k = s.x + "," + s.y;
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(s);
+      }
+      const kept = [];
+      for (const g of groups.values()) {
+        const nF = g[0].f.length;
+        const med = new Array(nF).fill(0);
+        for (let i = 0; i < nF; i++) {
+          med[i] = g.map((s) => s.f[i]).sort((a, b) => a - b)[Math.floor(g.length / 2)];
+        }
+        const devs = g.map((s) => s.f.reduce((sum, v, i) => sum + Math.abs(v - med[i]), 0));
+        const sorted = [...devs].sort((a, b) => a - b);
+        const mad = sorted[Math.floor(sorted.length / 2)] || 1e-6;
+        const thresh = Math.max(mad * 3, 0.15);
+        g.forEach((s, idx) => {
+          if (devs[idx] <= thresh) kept.push(s);
+        });
+      }
+      this.samples = kept;
+    }
     fit(lambda = 1e-3) {
+      this.rejectOutliers();
       if (this.samples.length < 30) return null;
       const coefX = this.solve("x", lambda);
       const coefY = this.solve("y", lambda);
@@ -23985,7 +24016,7 @@
     }
   };
   var GazeFilter = class {
-    constructor(minCutoff = 1.2, beta = 0.06, dCutoff = 1) {
+    constructor(minCutoff = 0.9, beta = 0.15, dCutoff = 1) {
       this.minCutoff = minCutoff;
       this.beta = beta;
       this.dCutoff = dCutoff;
@@ -23998,6 +24029,14 @@
     dxLp = new LowPass();
     dyLp = new LowPass();
     lastT = null;
+    // 3-frame median pre-filter: kills single-frame iris landmark spikes
+    // (blink saccades, detector jitter) without adding meaningful lag.
+    xs = [];
+    ys = [];
+    median3(a) {
+      const s = [...a].sort((p, q) => p - q);
+      return s[1];
+    }
     alpha(cutoff, dt) {
       const tau = 1 / (2 * Math.PI * cutoff);
       return 1 / (1 + tau / dt);
@@ -24008,10 +24047,18 @@
       this.dxLp = new LowPass();
       this.dyLp = new LowPass();
       this.lastT = null;
+      this.xs = [];
+      this.ys = [];
     }
     filter(x, y, tSec) {
       const dt = this.lastT === null ? 1 / 60 : Math.max(1e-3, tSec - this.lastT);
       this.lastT = tSec;
+      this.xs.push(x);
+      if (this.xs.length > 3) this.xs.shift();
+      this.ys.push(y);
+      if (this.ys.length > 3) this.ys.shift();
+      x = this.xs.length === 3 ? this.median3(this.xs) : x;
+      y = this.ys.length === 3 ? this.median3(this.ys) : y;
       const dx = this.xLp.last() === null ? 0 : (x - this.xLp.last()) / dt;
       const dy = this.yLp.last() === null ? 0 : (y - this.yLp.last()) / dt;
       const edx = this.dxLp.filter(dx, this.alpha(this.dCutoff, dt));
@@ -24073,7 +24120,7 @@
       return Math.max(320, this.naturalP95() + 180);
     }
   };
-  var IntentEngine = class {
+  var IntentEngine = class _IntentEngine {
     constructor(dwellMs = 700, cooldownMs = 600, doubleBlinkWindowMs = 800) {
       this.dwellMs = dwellMs;
       this.cooldownMs = cooldownMs;
@@ -24084,6 +24131,9 @@
     doubleBlinkWindowMs;
     dwellTargetId = null;
     dwellStart = 0;
+    lastHitId = null;
+    lastHitT = 0;
+    static dwellGraceMs = 180;
     intentionalBlinkTimes = [];
     pendingBlink = null;
     cooldownUntil = 0;
@@ -24116,24 +24166,26 @@
       if (base.inCooldown) return base;
       const blinkEnd = this.pendingBlink;
       this.pendingBlink = null;
-      const hit = gaze.valid ? this.resolver.resolve(gaze.x, gaze.y, targets, 18) : null;
+      const hit = gaze.valid ? this.resolver.resolve(gaze.x, gaze.y, targets, 22) : null;
       if (blinkEnd !== null && hit) {
         this.cooldownUntil = tMs + this.cooldownMs;
         this.dwellTargetId = null;
         return { intent: { kind: "select", targetId: hit.id, via: "blink" }, dwellTargetId: null, dwellProgress: 0, inCooldown: false };
       }
-      if (hit) {
-        if (this.dwellTargetId !== hit.id) {
-          this.dwellTargetId = hit.id;
+      if (hit) this.lastHitId = hit.id, this.lastHitT = tMs;
+      const effHit = hit || (this.dwellTargetId !== null && this.lastHitId === this.dwellTargetId && tMs - this.lastHitT < _IntentEngine.dwellGraceMs ? { id: this.dwellTargetId } : null);
+      if (effHit) {
+        if (this.dwellTargetId !== effHit.id) {
+          this.dwellTargetId = effHit.id;
           this.dwellStart = tMs;
         }
         const prog = (tMs - this.dwellStart) / this.dwellMs;
-        if (prog >= 1) {
+        if (prog >= 1 && hit) {
           this.cooldownUntil = tMs + this.cooldownMs;
           this.dwellTargetId = null;
-          return { intent: { kind: "select", targetId: hit.id, via: "dwell" }, dwellTargetId: null, dwellProgress: 0, inCooldown: false };
+          return { intent: { kind: "select", targetId: effHit.id, via: "dwell" }, dwellTargetId: null, dwellProgress: 0, inCooldown: false };
         }
-        return { intent: null, dwellTargetId: hit.id, dwellProgress: Math.max(0, Math.min(1, prog)), inCooldown: false };
+        return { intent: null, dwellTargetId: effHit.id, dwellProgress: Math.max(0, Math.min(1, prog)), inCooldown: false };
       }
       this.dwellTargetId = null;
       return { intent: null, dwellTargetId: null, dwellProgress: 0, inCooldown: false };
@@ -24305,6 +24357,7 @@
     const gazeRef = (0, import_react.useRef)({ x: 0, y: 0, valid: false, lastValidT: 0 });
     const pointerRef = (0, import_react.useRef)(null);
     const poseRef = (0, import_react.useRef)(null);
+    const confRef = (0, import_react.useRef)(0);
     const fpsRef = (0, import_react.useRef)({ frames: 0, t0: 0, avg: 0 });
     const lightCanvasRef = (0, import_react.useRef)(null);
     const dwellPtsRef = (0, import_react.useRef)([]);
@@ -24325,7 +24378,7 @@
     const demoMapRef = (0, import_react.useRef)(null);
     const calibIndexRef = (0, import_react.useRef)(0);
     const calibStateRef = (0, import_react.useRef)({ phase: "settle", t0: 0, collected: 0 });
-    const trialStateRef = (0, import_react.useRef)({ target: null, t0: 0, dwellT0: null, total: 0, valid: 0, minDist: Infinity, records: [], idx: 0, betweenT: null });
+    const trialStateRef = (0, import_react.useRef)({ target: null, t0: 0, dwellT0: null, total: 0, valid: 0, minDist: Infinity, records: [], idx: 0, betweenT: null, confSum: 0 });
     (0, import_react.useEffect)(() => {
       modeRef.current = mode;
     }, [mode]);
@@ -24558,6 +24611,7 @@
         }
         const g = sampleGaze(tSec);
         if (g) {
+          confRef.current = g.conf;
           if (g.valid) {
             gazeRef.current = { x: g.x, y: g.y, valid: true, lastValidT: now };
           } else gazeRef.current.valid = false;
@@ -24621,6 +24675,7 @@
             }
           } else if (ts.target) {
             ts.total++;
+            ts.confSum += confRef.current;
             const gx = gazeRef.current.x, gy = gazeRef.current.y;
             if (gazeRef.current.valid) {
               ts.valid++;
@@ -24709,7 +24764,7 @@
         predY,
         acquisitionMs: hit ? Math.round(now - ts.t0) : null,
         errorPx: hit && errAtAcquire !== null ? Math.round(errAtAcquire) : null,
-        confidence: ts.total > 0 ? Math.round(ts.valid / ts.total * 100) / 100 : 0,
+        confidence: ts.total > 0 ? Math.round(ts.confSum / ts.total * 100) / 100 : 0,
         minDistancePx: ts.minDist === Infinity ? -1 : Math.round(ts.minDist),
         headYaw: pose ? Math.round(pose.yaw * 1e3) / 1e3 : null,
         headPitch: pose ? Math.round(pose.pitch * 1e3) / 1e3 : null,
@@ -24973,7 +25028,7 @@
       /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
         Header,
         {
-          title: "Look - gaze prototype, Phase 2",
+          title: "Look - gaze prototype, Phase 2.1 (accuracy iteration)",
           fact: "Camera to calibrated gaze cursor with dwell, blink, undo, scrolling, and a gaze keyboard - measured honestly",
           intro: "Research prototype for eye-controlled phone input: front camera, face and iris landmarks, 9-point calibration, filtered gaze cursor, dwell-to-select with a progress ring, blink-to-select with calibrated natural-vs-intentional timing, double-blink undo, gaze scrolling zones, and a gaze keyboard with word prediction. Tests log selection accuracy, false activations per minute, time-to-select, error distance, acquisition time, and tracking confidence. Everything runs on this device - the face model is built into the page itself, and no video, gaze, or typing ever leaves the phone."
         }
