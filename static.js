@@ -24403,7 +24403,7 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.9";
+  var BUILD = "2.10";
   var VPSCALE = !new URLSearchParams(window.location.search).has("novpscale");
   var NOINTENT = new URLSearchParams(window.location.search).has("nointent");
   var NODISTCOMP = new URLSearchParams(window.location.search).has("nodistcomp");
@@ -24493,6 +24493,16 @@
     const intentEngineRef = (0, import_react.useRef)(new IntentEngine());
     const intentLockRef = (0, import_react.useRef)(new IntentLock());
     const distCRef = (0, import_react.useRef)(1);
+    const biasCorrRef = (0, import_react.useRef)({ x: 0, y: 0 });
+    const fixStateRef = (0, import_react.useRef)({ phase: "settle", t0: 0, preds: [], offsets: [] });
+    const fixIndexRef = (0, import_react.useRef)(0);
+    const fixReturnRef = (0, import_react.useRef)("ready");
+    const [fixIndex, setFixIndex] = (0, import_react.useState)(0);
+    const [fixProgress, setFixProgress] = (0, import_react.useState)(0);
+    const [fixToast, setFixToast] = (0, import_react.useState)(false);
+    const confEMARef = (0, import_react.useRef)(1);
+    const lowSinceRef = (0, import_react.useRef)(null);
+    const [lowTrack, setLowTrack] = (0, import_react.useState)(false);
     const actionEngineRef = (0, import_react.useRef)(new ActionEngine());
     const demoBlinkStartRef = (0, import_react.useRef)(null);
     const demoBlinkQueueRef = (0, import_react.useRef)([]);
@@ -24674,6 +24684,9 @@
         const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
         est = { x: cx + (est.x - cx) * c, y: cy + (est.y - cy) * c };
       }
+      if (biasCorrRef.current.x !== 0 || biasCorrRef.current.y !== 0) {
+        est = { x: est.x + biasCorrRef.current.x, y: est.y + biasCorrRef.current.y };
+      }
       const f = filterRef.current.filter(est.x, est.y, tSec);
       return { x: f.x, y: f.y, valid: true, conf: frame.confidence };
     };
@@ -24685,7 +24698,7 @@
       return extractFeatures(latestLmRef.current).features;
     };
     (0, import_react.useEffect)(() => {
-      if (!["calibrate", "ready", "trials", "select", "scroll", "keyboard"].includes(mode)) return;
+      if (!["calibrate", "ready", "trials", "select", "scroll", "keyboard", "fixdrift"].includes(mode)) return;
       let raf = 0;
       let lastSend = 0;
       const loop = async () => {
@@ -24744,6 +24757,7 @@
                   coefRef.current = { x: fit.coefX, y: fit.coefY, field: fit.residualField, vw: window.innerWidth, vh: window.innerHeight };
                   calibFaceWRef.current = poseRef.current ? poseRef.current.faceW : 0;
                   distCRef.current = 1;
+                  biasCorrRef.current = { x: 0, y: 0 };
                   setFitError(Math.round(fit.meanResidualPx));
                   setBlinkInfo({ naturalMs: Math.round(blinkTrackerRef.current.naturalP95()), intentionalMs: Math.round(blinkTrackerRef.current.intentionalThresholdMs()) });
                   filterRef.current.reset();
@@ -24756,6 +24770,46 @@
             }
           }
         }
+        if (modeRef.current === "fixdrift") {
+          const W = window.innerWidth, H = window.innerHeight;
+          const fpts = [{ x: Math.round(W * 0.5), y: Math.round(H * 0.5) }, { x: Math.round(W * 0.22), y: Math.round(H * 0.3) }, { x: Math.round(W * 0.78), y: Math.round(H * 0.7) }];
+          const fs2 = fixStateRef.current;
+          const fpt = fpts[Math.min(fixIndexRef.current, fpts.length - 1)];
+          if (fs2.phase === "settle") {
+            if (!fs2.t0) fs2.t0 = now;
+            setFixProgress(Math.min(1, (now - fs2.t0) / 500) * 0.2);
+            if (now - fs2.t0 > 500) {
+              fs2.phase = "collect";
+              fs2.t0 = now;
+              fs2.preds = [];
+            }
+          } else {
+            if (gazeRef.current.valid) fs2.preds.push({ x: gazeRef.current.x, y: gazeRef.current.y });
+            setFixProgress(0.2 + Math.min(1, (now - fs2.t0) / 700) * 0.8);
+            if (now - fs2.t0 > 700) {
+              if (fs2.preds.length >= 5) {
+                const mx = fs2.preds.reduce((s, p) => s + p.x, 0) / fs2.preds.length;
+                const my = fs2.preds.reduce((s, p) => s + p.y, 0) / fs2.preds.length;
+                fs2.offsets.push({ x: fpt.x - mx, y: fpt.y - my });
+              }
+              if (fixIndexRef.current < fpts.length - 1) {
+                fixIndexRef.current++;
+                setFixIndex(fixIndexRef.current);
+                fixStateRef.current = { phase: "settle", t0: 0, preds: [], offsets: fs2.offsets };
+              } else {
+                if (fs2.offsets.length >= 2) {
+                  biasCorrRef.current = {
+                    x: biasCorrRef.current.x + fs2.offsets.reduce((s, o) => s + o.x, 0) / fs2.offsets.length,
+                    y: biasCorrRef.current.y + fs2.offsets.reduce((s, o) => s + o.y, 0) / fs2.offsets.length
+                  };
+                  setFixToast(true);
+                  setTimeout(() => setFixToast(false), 1800);
+                }
+                setMode(fixReturnRef.current);
+              }
+            }
+          }
+        }
         const g = sampleGaze(tSec);
         if (g) {
           confRef.current = g.conf;
@@ -24763,6 +24817,16 @@
             gazeRef.current = { x: g.x, y: g.y, valid: true, lastValidT: now };
           } else gazeRef.current.valid = false;
           setTrackingLost(now - gazeRef.current.lastValidT > 700);
+          if (sourceRef.current === "camera") {
+            confEMARef.current = confEMARef.current * 0.97 + (isFinite(g.conf) ? g.conf : 0) * 0.03;
+            if (confEMARef.current < 0.8) {
+              if (lowSinceRef.current === null) lowSinceRef.current = now;
+              else if (now - lowSinceRef.current > 2500 && !lowTrack) setLowTrack(true);
+            } else if (confEMARef.current > 0.87) {
+              lowSinceRef.current = null;
+              if (lowTrack) setLowTrack(false);
+            }
+          }
           if (sourceRef.current === "camera" && calibFaceWRef.current > 0 && modeRef.current !== "calibrate" && poseRef.current) {
             const dr = Math.abs(poseRef.current.faceW - calibFaceWRef.current) / calibFaceWRef.current;
             setDistDrift(dr > 0.15);
@@ -25176,6 +25240,13 @@
       setTrials([]);
       setMode("trials");
     };
+    const startFixDrift = () => {
+      fixReturnRef.current = modeRef.current === "fixdrift" ? "ready" : modeRef.current;
+      fixIndexRef.current = 0;
+      setFixIndex(0);
+      fixStateRef.current = { phase: "settle", t0: 0, preds: [], offsets: [] };
+      setMode("fixdrift");
+    };
     const quitToIntro = () => {
       stopCamera();
       setMode("intro");
@@ -25252,6 +25323,24 @@
             transform: `translate3d(${calibPts[Math.min(calibIndex, 8)].x - 16}px, ${calibPts[Math.min(calibIndex, 8)].y - 16}px, 0)`
           }, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-calib-ring", style: { ["--p"]: calibProgress } }) })
         ] }),
+        mode === "fixdrift" && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "gaze-hud-top", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { children: [
+              "Fix drift ",
+              Math.min(fixIndex + 1, 3),
+              " / 3 - look at the dot"
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "gaze-quit", onClick: () => setMode(fixReturnRef.current), children: "Cancel" })
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-calib-dot", style: {
+            transform: `translate3d(${[0.5, 0.22, 0.78][Math.min(fixIndex, 2)] * window.innerWidth - 16}px, ${[0.5, 0.3, 0.7][Math.min(fixIndex, 2)] * window.innerHeight - 16}px)`
+          }, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-calib-ring", style: { ["--p"]: fixProgress } }) })
+        ] }),
+        fixToast && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-lost", style: { top: 56, background: "rgba(20,120,60,0.92)" }, children: "Drift fixed" }),
+        lowTrack && mode !== "calibrate" && mode !== "fixdrift" && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "gaze-lost", style: { top: 56 }, children: [
+          "Tracking is struggling - bright light? Turn so the sun is behind you, or ",
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "gaze-link", onClick: startFixDrift, children: "fix drift (6s)" })
+        ] }),
         mode === "ready" && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
           /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "gaze-hud-top", children: [
             /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { children: [
@@ -25290,7 +25379,8 @@
               /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "gaze-btn", onClick: startKeyboard, children: "Gaze keyboard" }),
               /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "gaze-btn", onClick: startScroll, children: "Scroll demo" }),
               /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "gaze-btn secondary", onClick: startTrials, children: "Accuracy test (12 targets)" }),
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "gaze-btn secondary", onClick: () => begin(source), children: "Recalibrate" })
+              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "gaze-btn secondary", onClick: () => begin(source), children: "Recalibrate" }),
+              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "gaze-btn secondary", onClick: startFixDrift, children: "Fix drift (6s)" })
             ] })
           ] })
         ] }),

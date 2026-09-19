@@ -326,3 +326,12 @@
   border-radius: 10px;
   padding: 12px 14px;
 }
+button.gaze-link {
+  background: none;
+  border: none;
+  color: #fff;
+  text-decoration: underline;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+}
