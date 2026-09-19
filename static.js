@@ -24403,9 +24403,10 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.8";
+  var BUILD = "2.9";
   var VPSCALE = !new URLSearchParams(window.location.search).has("novpscale");
   var NOINTENT = new URLSearchParams(window.location.search).has("nointent");
+  var NODISTCOMP = new URLSearchParams(window.location.search).has("nodistcomp");
   {
     const q = new URLSearchParams(window.location.search);
     setFlags({ roll: !q.has("noroll"), fastDwell: !q.has("nofastdwell") });
@@ -24491,6 +24492,7 @@
     const blinkTrackerRef = (0, import_react.useRef)(new BlinkTracker());
     const intentEngineRef = (0, import_react.useRef)(new IntentEngine());
     const intentLockRef = (0, import_react.useRef)(new IntentLock());
+    const distCRef = (0, import_react.useRef)(1);
     const actionEngineRef = (0, import_react.useRef)(new ActionEngine());
     const demoBlinkStartRef = (0, import_react.useRef)(null);
     const demoBlinkQueueRef = (0, import_react.useRef)([]);
@@ -24665,7 +24667,13 @@
       if (!coef) return null;
       const est0 = predict(coef.x, coef.y, frame.features);
       const estc = correctGaze(est0.x, est0.y, coef.field);
-      const est = VPSCALE ? { x: estc.x * window.innerWidth / (coef.vw || window.innerWidth), y: estc.y * window.innerHeight / (coef.vh || window.innerHeight) } : estc;
+      let est = VPSCALE ? { x: estc.x * window.innerWidth / (coef.vw || window.innerWidth), y: estc.y * window.innerHeight / (coef.vh || window.innerHeight) } : estc;
+      if (!NODISTCOMP && calibFaceWRef.current > 0 && frame.pose && frame.pose.faceW > 0) {
+        distCRef.current = distCRef.current * 0.95 + calibFaceWRef.current / frame.pose.faceW * 0.05;
+        const c = Math.max(0.75, Math.min(1.3, distCRef.current));
+        const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
+        est = { x: cx + (est.x - cx) * c, y: cy + (est.y - cy) * c };
+      }
       const f = filterRef.current.filter(est.x, est.y, tSec);
       return { x: f.x, y: f.y, valid: true, conf: frame.confidence };
     };
@@ -24735,6 +24743,7 @@
                 if (fit) {
                   coefRef.current = { x: fit.coefX, y: fit.coefY, field: fit.residualField, vw: window.innerWidth, vh: window.innerHeight };
                   calibFaceWRef.current = poseRef.current ? poseRef.current.faceW : 0;
+                  distCRef.current = 1;
                   setFitError(Math.round(fit.meanResidualPx));
                   setBlinkInfo({ naturalMs: Math.round(blinkTrackerRef.current.naturalP95()), intentionalMs: Math.round(blinkTrackerRef.current.intentionalThresholdMs()) });
                   filterRef.current.reset();
@@ -24974,7 +24983,7 @@
         when: (/* @__PURE__ */ new Date()).toISOString(),
         avgFps: fpsRef.current.avg,
         build: BUILD,
-        flags: { ...FLAGS, intent: !NOINTENT, vpscale: VPSCALE }
+        flags: { ...FLAGS, intent: !NOINTENT, vpscale: VPSCALE, distcomp: !NODISTCOMP }
       };
     };
     const begin = async (src) => {
