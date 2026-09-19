@@ -24058,6 +24058,14 @@
     filter(x, y, tSec) {
       const dt = this.lastT === null ? 1 / 60 : Math.max(1e-3, tSec - this.lastT);
       this.lastT = tSec;
+      if (this.prevRawX !== null && this.prevRawY !== null && Math.hypot(x - this.prevRawX, y - this.prevRawY) > 120) {
+        this.xLp = new LowPass();
+        this.yLp = new LowPass();
+        this.dxLp = new LowPass();
+        this.dyLp = new LowPass();
+        this.xs = [];
+        this.ys = [];
+      }
       this.xs.push(x);
       if (this.xs.length > 3) this.xs.shift();
       this.ys.push(y);
@@ -24078,6 +24086,19 @@
       };
     }
   };
+  function magnetize(x, y, targets, capturePx = 90) {
+    let best = null, bestD = Infinity;
+    for (const t of targets) {
+      const dist = Math.hypot(x - t.x, y - t.y);
+      if (dist < bestD) {
+        best = t;
+        bestD = dist;
+      }
+    }
+    if (!best || bestD > capturePx) return { x, y, id: null };
+    const w = 1 - bestD / capturePx;
+    return { x: x + (best.x - x) * w, y: y + (best.y - y) * w, id: best.id };
+  }
   var TargetResolver = class {
     resolve(gx, gy, targets, slackPx = 14) {
       let best = null, bestD = Infinity;
@@ -24173,7 +24194,8 @@
       if (base.inCooldown) return base;
       const blinkEnd = this.pendingBlink;
       this.pendingBlink = null;
-      const hit = gaze.valid ? this.resolver.resolve(gaze.x, gaze.y, targets, 22) : null;
+      const mag = magnetize(gaze.x, gaze.y, targets, 70);
+      const hit = gaze.valid ? this.resolver.resolve(mag.x, mag.y, targets, 22) : null;
       if (blinkEnd !== null && hit) {
         this.cooldownUntil = tMs + this.cooldownMs;
         this.dwellTargetId = null;
@@ -24292,6 +24314,7 @@
     };
     return mpFilesCache;
   }
+  var BUILD = "2.3";
   var TRIAL_COUNT = 12;
   var SCROLL_PARAS = [
     "GLANYC is a prototype for controlling a phone with your eyes. This screen scrolls without any touch: hold your gaze near the bottom edge to move down, near the top edge to move back up. The middle of the screen is a dead zone so ordinary reading never scrolls by accident.",
@@ -24626,8 +24649,14 @@
           const cur = cursorRef.current;
           if (cur) {
             const show = gazeRef.current.valid;
+            let cx = gazeRef.current.x, cy = gazeRef.current.y;
+            if (modeRef.current === "trials" && trialStateRef.current.target) {
+              const m0 = magnetize(cx, cy, [trialStateRef.current.target], 90);
+              cx = m0.x;
+              cy = m0.y;
+            }
             cur.style.opacity = show ? "0.9" : "0.15";
-            cur.style.transform = `translate3d(${gazeRef.current.x - 11}px, ${gazeRef.current.y - 11}px, 0)`;
+            cur.style.transform = `translate3d(${cx - 11}px, ${cy - 11}px, 0)`;
           }
         }
         let intentionalBlink = null;
@@ -24682,11 +24711,12 @@
             }
           } else if (ts.target) {
             ts.total++;
-            ts.confSum += confRef.current;
+            ts.confSum += isFinite(confRef.current) ? confRef.current : 0;
             const gx = gazeRef.current.x, gy = gazeRef.current.y;
             if (gazeRef.current.valid) {
               ts.valid++;
-              const hit = resolverRef.current.resolve(gx, gy, [ts.target], HIT_SLACK);
+              const mg = magnetize(gx, gy, [ts.target], 90);
+              const hit = resolverRef.current.resolve(mg.x, mg.y, [ts.target], HIT_SLACK);
               const dist = Math.hypot(gx - ts.target.x, gy - ts.target.y);
               if (dist < ts.minDist) ts.minDist = dist;
               if (hit) ts.lastHitT = now;
@@ -24774,7 +24804,8 @@
         predY,
         acquisitionMs: hit ? Math.round(now - ts.t0) : null,
         errorPx: hit && errAtAcquire !== null ? Math.round(errAtAcquire) : null,
-        confidence: ts.total > 0 ? Math.round(ts.confSum / ts.total * 100) / 100 : 0,
+        confidence: ts.total > 0 && isFinite(ts.confSum) ? Math.round(ts.confSum / ts.total * 100) / 100 : 0,
+        validPct: ts.total > 0 ? Math.round(ts.valid / ts.total * 100) : 0,
         minDistancePx: ts.minDist === Infinity ? -1 : Math.round(ts.minDist),
         headYaw: pose ? Math.round(pose.yaw * 1e3) / 1e3 : null,
         headPitch: pose ? Math.round(pose.pitch * 1e3) / 1e3 : null,
@@ -24813,7 +24844,8 @@
         screenH: window.innerHeight,
         source: sourceRef.current,
         when: (/* @__PURE__ */ new Date()).toISOString(),
-        avgFps: fpsRef.current.avg
+        avgFps: fpsRef.current.avg,
+        build: BUILD
       };
     };
     const begin = async (src) => {
@@ -25038,7 +25070,7 @@
       /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
         Header,
         {
-          title: "GLANYC - control your phone with your eyes (prototype, Phase 2.2)",
+          title: `GLANYC - control your phone with your eyes (prototype, Phase ${BUILD})`,
           fact: "Camera to calibrated gaze cursor with dwell, blink, undo, scrolling, and a gaze keyboard - measured honestly",
           intro: "Research prototype for eye-controlled phone input: front camera, face and iris landmarks, 9-point calibration, filtered gaze cursor, dwell-to-select with a progress ring, blink-to-select with calibrated natural-vs-intentional timing, double-blink undo, gaze scrolling zones, and a gaze keyboard with word prediction. Tests log selection accuracy, false activations per minute, time-to-select, error distance, acquisition time, and tracking confidence. Everything runs on this device - the face model is built into the page itself, and no video, gaze, or typing ever leaves the phone."
         }
