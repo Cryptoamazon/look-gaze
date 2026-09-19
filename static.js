@@ -24581,7 +24581,7 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.17c";
+  var BUILD = "2.17d";
   var VPSCALE = !new URLSearchParams(window.location.search).has("novpscale");
   var NOINTENT = new URLSearchParams(window.location.search).has("nointent");
   var NODISTCOMP = new URLSearchParams(window.location.search).has("nodistcomp");
@@ -24832,6 +24832,26 @@
         return false;
       }
     }, [stopCamera]);
+    (0, import_react.useEffect)(() => {
+      const v = videoRef.current;
+      if (v && streamRef.current && v.srcObject !== streamRef.current) {
+        v.srcObject = streamRef.current;
+        v.play().catch(() => void 0);
+        if (v.videoWidth) setFrameAspect(v.videoWidth, v.videoHeight);
+        else v.addEventListener("loadedmetadata", () => setFrameAspect(v.videoWidth, v.videoHeight), { once: true });
+      }
+    });
+    const [fatalErr, setFatalErr] = (0, import_react.useState)(null);
+    (0, import_react.useEffect)(() => {
+      const onErr = (e) => setFatalErr(String(e.message || e.error || "error").slice(0, 300));
+      const onRej = (e) => setFatalErr(String(e.reason?.message || e.reason || "unhandled rejection").slice(0, 300));
+      window.addEventListener("error", onErr);
+      window.addEventListener("unhandledrejection", onRej);
+      return () => {
+        window.removeEventListener("error", onErr);
+        window.removeEventListener("unhandledrejection", onRej);
+      };
+    }, []);
     const ensureDemoMap = () => {
       if (demoMapRef.current) return demoMapRef.current;
       const rand = () => Math.random() * 2 - 1;
@@ -25569,7 +25589,6 @@
       kbSetText("");
       setLastAction(null);
       setMode("keyboard");
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       const ok = await startCamera();
       if (!ok) setMode("intro");
     };
@@ -25625,7 +25644,15 @@
           /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "file-button is-compact", "data-variant": "secondary", onClick: () => begin("demo"), children: "Demo mode (no camera)" })
         ] }),
         camError && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "gaze-error", children: camError }),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "gaze-note", children: "Demo mode simulates gaze with your finger or mouse so the full calibration, filtering, and scoring pipeline can be exercised anywhere." })
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "gaze-note", children: "Demo mode simulates gaze with your finger or mouse so the full calibration, filtering, and scoring pipeline can be exercised anywhere." }),
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("p", { className: "gaze-note", style: { opacity: 0.5 }, children: [
+          "v",
+          BUILD
+        ] }),
+        fatalErr && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("p", { className: "gaze-error", children: [
+          "Error: ",
+          fatalErr
+        ] })
       ] }) }),
       lastSummary && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Group, { label: "Last run", heading: true, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Facts, { items: [
         { label: "Targets hit", value: `${Math.round(lastSummary.hitRate * 100)}% of ${lastSummary.trials}` },
@@ -25641,6 +25668,14 @@
       /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Closing, { children: "Prototype only. No accounts, no uploads, no App Store anything. Camera data never leaves the device." }),
       inOverlay && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "gaze-overlay", ref: overlayRef, children: [
         /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("video", { ref: videoRef, className: "gaze-video", style: { display: source === "camera" ? "block" : "none" }, playsInline: true, muted: true, autoPlay: true }),
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: { position: "absolute", left: 6, bottom: 4, fontSize: 10, opacity: 0.45, color: "#fff", pointerEvents: "none" }, children: [
+          "v",
+          BUILD
+        ] }),
+        fatalErr && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "gaze-error", style: { position: "absolute", top: 44, left: 8, right: 8, zIndex: 50 }, children: [
+          "Error: ",
+          fatalErr
+        ] }),
         mode === "calibrate" && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
           /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "gaze-hud-top", children: [
             /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { children: [
