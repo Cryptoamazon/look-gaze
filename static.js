@@ -24186,7 +24186,7 @@
       this.cooldownUntil = 0;
     }
     // Feed every valid filtered gaze point. Returns the active lock (or none).
-    update(x, y, tMs, targets2) {
+    update(x, y, tMs, targets) {
       if (this.lock.targetId !== null && tMs > this.lock.until) this.lock = { targetId: null, until: 0, cx: 0, cy: 0 };
       const last = this.pts[this.pts.length - 1];
       if (last && Math.hypot(x - last.x, y - last.y) > 90) this.pts = [];
@@ -24202,7 +24202,7 @@
       if (maxDev > 45) return this.lock;
       const R = 150;
       let best = null, bestD = Infinity, secondD = Infinity;
-      for (const t of targets2) {
+      for (const t of targets) {
         const d2 = Math.hypot(t.x - cx, t.y - cy);
         if (d2 > R + t.r) continue;
         if (d2 < bestD) {
@@ -24225,9 +24225,9 @@
       this.reset();
     }
   };
-  function magnetize(x, y, targets2, capturePx = 90) {
+  function magnetize(x, y, targets, capturePx = 90) {
     let best = null, bestD = Infinity;
-    for (const t of targets2) {
+    for (const t of targets) {
       const dist = Math.hypot(x - t.x, y - t.y);
       if (dist < bestD) {
         best = t;
@@ -24239,9 +24239,9 @@
     return { x: x + (best.x - x) * w, y: y + (best.y - y) * w, id: best.id };
   }
   var TargetResolver = class {
-    resolve(gx, gy, targets2, slackPx = 14) {
+    resolve(gx, gy, targets, slackPx = 14) {
       let best = null, bestD = Infinity;
-      for (const t of targets2) {
+      for (const t of targets) {
         const dist = Math.hypot(gx - t.x, gy - t.y);
         if (dist <= t.r + slackPx && dist < bestD) {
           best = t;
@@ -24336,7 +24336,7 @@
       this.challengeId = null;
       this.frozenProg = 0;
     }
-    update(gaze, targets2, intentionalBlink, tMs) {
+    update(gaze, targets, intentionalBlink, tMs) {
       if (intentionalBlink) {
         const t = intentionalBlink.endT;
         this.intentionalBlinkTimes.push(t);
@@ -24354,8 +24354,8 @@
       if (base.inCooldown) return base;
       const blinkEnd = this.pendingBlink;
       this.pendingBlink = null;
-      const mag = magnetize(gaze.x, gaze.y, targets2, 70);
-      let hit = gaze.valid ? this.resolver.resolve(mag.x, mag.y, targets2, 22) : null;
+      const mag = magnetize(gaze.x, gaze.y, targets, 70);
+      let hit = gaze.valid ? this.resolver.resolve(mag.x, mag.y, targets, 22) : null;
       let challenging = false;
       if (FLAGS.kbtune && hit && this.dwellTargetId !== null && hit.id !== this.dwellTargetId) {
         if (this.challengeId !== hit.id) {
@@ -24581,7 +24581,7 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.17";
+  var BUILD = "2.17b";
   var VPSCALE = !new URLSearchParams(window.location.search).has("novpscale");
   var NOINTENT = new URLSearchParams(window.location.search).has("nointent");
   var NODISTCOMP = new URLSearchParams(window.location.search).has("nodistcomp");
@@ -25084,16 +25084,16 @@
             y: hist.reduce((s, p) => s + p.y, 0) / hist.length
           };
         };
-        targetsRef.current = targets;
         if (modeRef.current === "select" || modeRef.current === "keyboard") {
           let gv = gazeRef.current.valid;
           if (intentionalBlink && !gv && now - gazeRef.current.lastValidT < 450) gv = true;
-          const targets2 = modeRef.current === "select" ? selectTargetsRef.current : kbLayoutRef.current.targets;
+          const targets = modeRef.current === "select" ? selectTargetsRef.current : kbLayoutRef.current.targets;
+          targetsRef.current = targets;
           let igx = gazeRef.current.x, igy = gazeRef.current.y;
           if (!NOINTENT && gv) {
-            const st = intentLockRef.current.update(igx, igy, now, targets2);
+            const st = intentLockRef.current.update(igx, igy, now, targets);
             if (st.targetId !== null) {
-              const lt = targets2.find((tt) => tt.id === st.targetId);
+              const lt = targets.find((tt) => tt.id === st.targetId);
               if (lt) {
                 const m = magnetize(igx, igy, [lt], 170);
                 igx = m.x;
@@ -25107,7 +25107,7 @@
             igx = kbSmoothRef.current.x;
             igy = kbSmoothRef.current.y;
           }
-          const up = intentEngineRef.current.update({ x: igx, y: igy, valid: gv }, targets2, intentionalBlink, now);
+          const up = intentEngineRef.current.update({ x: igx, y: igy, valid: gv }, targets, intentionalBlink, now);
           kbMagRef.current = modeRef.current === "keyboard" && FLAGS.kbtune ? up.magPoint : null;
           if (modeRef.current === "keyboard" && FLAGS.kbhover) {
             const hp = kbMagRef.current || (gv ? { x: igx, y: igy } : null);
@@ -25126,14 +25126,14 @@
               if (modeRef.current === "keyboard" && sid < 200) lastLetterSelRawRef.current = { ...raw, t: performance.now() };
               if (modeRef.current === "select") {
                 const pid = selectStateRef.current?.promptedId;
-                const pt = targets2.find((tt) => tt.id === pid);
+                const pt = targets.find((tt) => tt.id === pid);
                 if (pt && autocalRef.current.addPair(raw.x, raw.y, pt.x, pt.y)) setAutocalCount(autocalRef.current.count);
               }
             }
           }
           if (up.intent) intentLockRef.current.onSelect();
           if (up.dwellTargetId !== null && up.dwellProgress > 0) {
-            const t = targets2.find((tt) => tt.id === up.dwellTargetId);
+            const t = targets.find((tt) => tt.id === up.dwellTargetId);
             setDwellVis(t ? { x: t.x, y: t.y, r: t.r, p: up.dwellProgress } : null);
           } else if (dwellVisRef.current !== null) {
             setDwellVis(null);
@@ -25393,7 +25393,7 @@
     const buildKeyboard = () => {
       const W = window.innerWidth, H = window.innerHeight;
       const rows = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"];
-      const targets2 = [];
+      const targets = [];
       const labels = /* @__PURE__ */ new Map();
       const keyR = Math.min(30, Math.max(22, W / 24));
       const top = H * 0.4;
@@ -25401,20 +25401,20 @@
         const spacing = W / (row.length + 1);
         for (let i = 0; i < row.length; i++) {
           const id = 100 + ri * 10 + i;
-          targets2.push({ id, x: spacing * (i + 1), y: top + ri * keyR * 2.6, r: keyR });
+          targets.push({ id, x: spacing * (i + 1), y: top + ri * keyR * 2.6, r: keyR });
           labels.set(id, row[i]);
         }
       });
-      targets2.push({ id: 300, x: W * 0.18, y: top + 3 * keyR * 2.6, r: keyR });
+      targets.push({ id: 300, x: W * 0.18, y: top + 3 * keyR * 2.6, r: keyR });
       labels.set(300, "delete");
-      targets2.push({ id: 301, x: W * 0.5, y: top + 3 * keyR * 2.6, r: keyR });
+      targets.push({ id: 301, x: W * 0.5, y: top + 3 * keyR * 2.6, r: keyR });
       labels.set(301, "space");
-      targets2.push({ id: 302, x: W * 0.82, y: top + 3 * keyR * 2.6, r: keyR });
+      targets.push({ id: 302, x: W * 0.82, y: top + 3 * keyR * 2.6, r: keyR });
       labels.set(302, "clear");
-      for (let j = 0; j < 3; j++) targets2.push({ id: 200 + j, x: W * (0.2 + j * 0.3), y: H * 0.31, r: keyR + 16 });
-      targets2.push({ id: 303, x: W - 40, y: 44, r: 26 });
+      for (let j = 0; j < 3; j++) targets.push({ id: 200 + j, x: W * (0.2 + j * 0.3), y: H * 0.31, r: keyR + 16 });
+      targets.push({ id: 303, x: W - 40, y: 44, r: 26 });
       labels.set(303, "undo");
-      kbLayoutRef.current = { targets: targets2, labels };
+      kbLayoutRef.current = { targets, labels };
     };
     const currentWord = (text) => {
       const m = /([A-Za-z]*)$/.exec(text);
