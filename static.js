@@ -23859,6 +23859,14 @@
   var Closing = (p) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("footer", { className: "file-closing", children: p.children });
 
   // ../gaze-app/src/engine.ts
+  var FLAGS = { roll: true, field: false, fastDwell: true };
+  function setFlags(f) {
+    Object.assign(FLAGS, f);
+  }
+  var frameAspect = 1;
+  function setFrameAspect(w, h) {
+    if (w > 0 && h > 0) frameAspect = w / h;
+  }
   var L_OUTER = 33;
   var L_INNER = 133;
   var L_UP = 159;
@@ -23877,8 +23885,24 @@
   function d(a, b) {
     return Math.hypot(a.x - b.x, a.y - b.y);
   }
-  function extractFeatures(lm) {
-    if (!lm || lm.length < 478) return { features: null, blink: false, confidence: 0, pose: void 0 };
+  function extractFeatures(lm0) {
+    if (!lm0 || lm0.length < 478) return { features: null, blink: false, confidence: 0, pose: void 0 };
+    const lm = lm0.map((p) => ({ x: p.x, y: p.y, z: p.z }));
+    if (FLAGS.roll) {
+      const A = frameAspect;
+      const lcx = (lm[L_OUTER].x + lm[L_INNER].x) / 2 * A, lcy = (lm[L_OUTER].y + lm[L_INNER].y) / 2;
+      const rcx = (lm[R_OUTER].x + lm[R_INNER].x) / 2 * A, rcy = (lm[R_OUTER].y + lm[R_INNER].y) / 2;
+      const roll = Math.atan2(rcy - lcy, rcx - lcx);
+      if (Math.abs(roll) > 5e-3) {
+        const cx = (lcx + rcx) / 2, cy = (lcy + rcy) / 2;
+        const c = Math.cos(-roll), sn = Math.sin(-roll);
+        for (const p of lm) {
+          const dx = p.x * A - cx, dy = p.y - cy;
+          p.x = (cx + dx * c - dy * sn) / A;
+          p.y = cy + dx * sn + dy * c;
+        }
+      }
+    }
     const lOuter = lm[L_OUTER], lInner = lm[L_INNER], lUp = lm[L_UP], lLo = lm[L_LO], lIris = lm[L_IRIS];
     const rOuter = lm[R_OUTER], rInner = lm[R_INNER], rUp = lm[R_UP], rLo = lm[R_LO], rIris = lm[R_IRIS];
     const cheekL = lm[CHEEK_L], cheekR = lm[CHEEK_R], nose = lm[NOSE], forehead = lm[FOREHEAD], chin = lm[CHIN];
@@ -23990,14 +24014,41 @@
       if (this.samples.length < 30) return null;
       const coefX = this.solve("x", lambda);
       const coefY = this.solve("y", lambda);
+      const groups = /* @__PURE__ */ new Map();
+      for (const s of this.samples) {
+        const k = s.x + "," + s.y;
+        if (!groups.has(k)) groups.set(k, { x: s.x, y: s.y, rxs: [], rys: [] });
+        const g = groups.get(k);
+        g.rxs.push(dot(coefX, s.f) - s.x);
+        g.rys.push(dot(coefY, s.f) - s.y);
+      }
+      const mean = (a) => a.reduce((p, q) => p + q, 0) / a.length;
+      const residualField = FLAGS.field ? [...groups.values()].map((g) => ({
+        x: g.x,
+        y: g.y,
+        rx: mean(g.rxs),
+        ry: mean(g.rys)
+      })) : [];
       let sum = 0;
       for (const s of this.samples) {
-        const px = dot(coefX, s.f), py = dot(coefY, s.f);
-        sum += Math.hypot(px - s.x, py - s.y);
+        const c = correctGaze(dot(coefX, s.f), dot(coefY, s.f), residualField);
+        sum += Math.hypot(c.x - s.x, c.y - s.y);
       }
-      return { coefX, coefY, meanResidualPx: sum / this.samples.length };
+      return { coefX, coefY, meanResidualPx: sum / this.samples.length, residualField };
     }
   };
+  function correctGaze(x, y, field) {
+    if (!field || field.length === 0) return { x, y };
+    let wx = 0, wy = 0, wsum = 0;
+    for (const p of field) {
+      const dist = Math.hypot(x - p.x, y - p.y);
+      const w = 1 / Math.max(dist * dist, 25);
+      wx += p.rx * w;
+      wy += p.ry * w;
+      wsum += w;
+    }
+    return { x: x - wx / wsum, y: y - wy / wsum };
+  }
   function dot(a, b) {
     let s = 0;
     for (let i = 0; i < a.length; i++) s += a[i] * b[i];
@@ -24153,6 +24204,10 @@
       this.dwellMs = dwellMs;
       this.cooldownMs = cooldownMs;
       this.doubleBlinkWindowMs = doubleBlinkWindowMs;
+      if (FLAGS.fastDwell) {
+        this.dwellMs = Math.min(dwellMs, 450);
+        this.cooldownMs = Math.min(cooldownMs, 400);
+      }
     }
     dwellMs;
     cooldownMs;
@@ -24314,7 +24369,11 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.3";
+  var BUILD = "2.5";
+  {
+    const q = new URLSearchParams(window.location.search);
+    setFlags({ roll: !q.has("noroll"), field: q.has("field"), fastDwell: !q.has("nofastdwell") });
+  }
   var TRIAL_COUNT = 12;
   var SCROLL_PARAS = [
     "GLANYC is a prototype for controlling a phone with your eyes. This screen scrolls without any touch: hold your gaze near the bottom edge to move down, near the top edge to move back up. The middle of the screen is a dead zone so ordinary reading never scrolls by accident.",
@@ -24333,7 +24392,7 @@
     "Bottom of the document. Look at the top edge to scroll back up."
   ];
   var SELECT_ROUNDS = 10;
-  var DWELL_MS = 300;
+  var DWELL_MS = FLAGS.fastDwell ? 220 : 300;
   var TRIAL_TIMEOUT_MS = 8e3;
   var HIT_SLACK = 40;
   function loadScript(src) {
@@ -24357,6 +24416,8 @@
     const [summary, setSummary] = (0, import_react.useState)(null);
     const [lastSummary, setLastSummary] = (0, import_react.useState)(null);
     const [trackingLost, setTrackingLost] = (0, import_react.useState)(false);
+    const [distDrift, setDistDrift] = (0, import_react.useState)(false);
+    const calibFaceWRef = (0, import_react.useRef)(0);
     const [activeTarget, setActiveTarget] = (0, import_react.useState)(null);
     const [blinkInfo, setBlinkInfo] = (0, import_react.useState)(null);
     const [selectTargets, setSelectTargets] = (0, import_react.useState)([]);
@@ -24501,6 +24562,8 @@
         if (v) {
           v.srcObject = stream;
           await v.play().catch(() => void 0);
+          if (v.videoWidth) setFrameAspect(v.videoWidth, v.videoHeight);
+          else v.addEventListener("loadedmetadata", () => setFrameAspect(v.videoWidth, v.videoHeight), { once: true });
         }
         setStatusLine("Loading face model...");
         await loadScript(mpFiles()["face_mesh.js"]);
@@ -24549,7 +24612,8 @@
         if (!p) return { x: 0, y: 0, valid: false, conf: 0 };
         const coef2 = coefRef.current;
         if (!coef2) return { x: p.x, y: p.y, valid: true, conf: 1 };
-        const est2 = predict(coef2.x, coef2.y, demoFeatures(p.x, p.y));
+        const est02 = predict(coef2.x, coef2.y, demoFeatures(p.x, p.y));
+        const est2 = correctGaze(est02.x, est02.y, coef2.field);
         const f2 = filterRef.current.filter(est2.x, est2.y, tSec);
         return { x: f2.x, y: f2.y, valid: true, conf: 0.98 };
       }
@@ -24558,7 +24622,8 @@
       if (!frame.features) return { x: 0, y: 0, valid: false, conf: frame.confidence };
       const coef = coefRef.current;
       if (!coef) return null;
-      const est = predict(coef.x, coef.y, frame.features);
+      const est0 = predict(coef.x, coef.y, frame.features);
+      const est = correctGaze(est0.x, est0.y, coef.field);
       const f = filterRef.current.filter(est.x, est.y, tSec);
       return { x: f.x, y: f.y, valid: true, conf: frame.confidence };
     };
@@ -24626,7 +24691,8 @@
               } else {
                 const fit = calibRef.current.fit();
                 if (fit) {
-                  coefRef.current = { x: fit.coefX, y: fit.coefY };
+                  coefRef.current = { x: fit.coefX, y: fit.coefY, field: fit.residualField };
+                  calibFaceWRef.current = poseRef.current ? poseRef.current.faceW : 0;
                   setFitError(Math.round(fit.meanResidualPx));
                   setBlinkInfo({ naturalMs: Math.round(blinkTrackerRef.current.naturalP95()), intentionalMs: Math.round(blinkTrackerRef.current.intentionalThresholdMs()) });
                   filterRef.current.reset();
@@ -24646,6 +24712,10 @@
             gazeRef.current = { x: g.x, y: g.y, valid: true, lastValidT: now };
           } else gazeRef.current.valid = false;
           setTrackingLost(now - gazeRef.current.lastValidT > 700);
+          if (sourceRef.current === "camera" && calibFaceWRef.current > 0 && modeRef.current !== "calibrate" && poseRef.current) {
+            const dr = Math.abs(poseRef.current.faceW - calibFaceWRef.current) / calibFaceWRef.current;
+            setDistDrift(dr > 0.15);
+          } else if (distDrift) setDistDrift(false);
           const cur = cursorRef.current;
           if (cur) {
             const show = gazeRef.current.valid;
@@ -24845,7 +24915,8 @@
         source: sourceRef.current,
         when: (/* @__PURE__ */ new Date()).toISOString(),
         avgFps: fpsRef.current.avg,
-        build: BUILD
+        build: BUILD,
+        flags: { ...FLAGS }
       };
     };
     const begin = async (src) => {
@@ -25102,8 +25173,10 @@
           /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "gaze-hud-top", children: [
             /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { children: [
               "Calibration ",
-              Math.min(calibIndex + 1, 9),
-              " / 9 - ",
+              Math.min(calibIndex + 1, calibPts.length),
+              " / ",
+              calibPts.length,
+              " - ",
               source === "demo" ? "hold your finger or mouse on the dot" : "look directly at the dot"
             ] }),
             /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "gaze-quit", onClick: quitToIntro, children: "Quit" })
@@ -25126,7 +25199,7 @@
           /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "gaze-ready-panel", children: [
             /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("p", { children: [
               /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("b", { children: "Select anything:" }),
-              " dwell on it ~0.7s (watch the ring fill) or ",
+              " dwell on it until the ring fills or ",
               source === "demo" ? "hold B past" : "hold a blink past",
               " ",
               blinkInfo ? blinkInfo.intentionalMs : 350,
@@ -25352,7 +25425,8 @@
         ] }),
         mode !== "results" && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
           /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-cursor", ref: cursorRef }),
-          trackingLost && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-lost", children: source === "demo" ? "Touch or move the mouse to simulate gaze" : "Tracking lost - face the camera" })
+          trackingLost && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-lost", children: source === "demo" ? "Touch or move the mouse to simulate gaze" : "Tracking lost - face the camera" }),
+          !trackingLost && distDrift && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-lost", children: "Phone moved from calibration distance - hold it where you calibrated" })
         ] })
       ] })
     ] });
