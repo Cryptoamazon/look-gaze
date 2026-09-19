@@ -23859,7 +23859,7 @@
   var Closing = (p) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("footer", { className: "file-closing", children: p.children });
 
   // ../gaze-app/src/engine.ts
-  var FLAGS = { roll: true, fastDwell: true, kbtune: true, blinkhold: true, kbhover: true, quadcal: true, posenudge: true, autocal: true };
+  var FLAGS = { roll: true, fastDwell: true, kbtune: true, blinkhold: true, kbhover: true, quadcal: true, posenudge: true, autocal: true, hdtrack: true };
   function setFlags(f) {
     Object.assign(FLAGS, f);
   }
@@ -24581,13 +24581,13 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.17d";
+  var BUILD = "2.18";
   var VPSCALE = !new URLSearchParams(window.location.search).has("novpscale");
   var NOINTENT = new URLSearchParams(window.location.search).has("nointent");
   var NODISTCOMP = new URLSearchParams(window.location.search).has("nodistcomp");
   {
     const q = new URLSearchParams(window.location.search);
-    setFlags({ roll: !q.has("noroll"), fastDwell: !q.has("nofastdwell"), kbtune: !q.has("nokbtune"), blinkhold: !q.has("noblinkhold"), kbhover: !q.has("nokbhover"), quadcal: !q.has("noquadcal"), posenudge: !q.has("noposenudge"), autocal: !q.has("noautocal") });
+    setFlags({ roll: !q.has("noroll"), fastDwell: !q.has("nofastdwell"), kbtune: !q.has("nokbtune"), blinkhold: !q.has("noblinkhold"), kbhover: !q.has("nokbhover"), quadcal: !q.has("noquadcal"), posenudge: !q.has("noposenudge"), autocal: !q.has("noautocal"), hdtrack: !q.has("nohdtrack") });
   }
   var TRIAL_COUNT = 12;
   var SCROLL_PARAS = [
@@ -24661,7 +24661,7 @@
     const modeRef = (0, import_react.useRef)("intro");
     const sourceRef = (0, import_react.useRef)("camera");
     const calibRef = (0, import_react.useRef)(new CalibrationEngine());
-    const filterRef = (0, import_react.useRef)(new GazeFilter());
+    const filterRef = (0, import_react.useRef)(FLAGS.hdtrack ? new GazeFilter(1.6, 0.09) : new GazeFilter());
     const resolverRef = (0, import_react.useRef)(new TargetResolver());
     const coefRef = (0, import_react.useRef)(null);
     const gazeRef = (0, import_react.useRef)({ x: 0, y: 0, valid: false, lastValidT: 0 });
@@ -24800,7 +24800,7 @@
       try {
         if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera API unavailable in this browser.");
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+          video: FLAGS.hdtrack ? { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60 } } : { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
           audio: false
         });
         streamRef.current = stream;
@@ -24932,7 +24932,7 @@
         }
         if (sourceRef.current === "camera" && runningRef.current && faceMeshRef.current) {
           const v = videoRef.current;
-          if (v && v.readyState >= 2 && now - lastSend > 33) {
+          if (v && v.readyState >= 2 && now - lastSend > (FLAGS.hdtrack ? 17 : 33)) {
             lastSend = now;
             try {
               await faceMeshRef.current.send({ image: v });
