@@ -23859,7 +23859,7 @@
   var Closing = (p) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("footer", { className: "file-closing", children: p.children });
 
   // ../gaze-app/src/engine.ts
-  var FLAGS = { roll: true, field: false, fastDwell: true };
+  var FLAGS = { roll: true, field: true, fastDwell: true };
   function setFlags(f) {
     Object.assign(FLAGS, f);
   }
@@ -24369,10 +24369,10 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.5";
+  var BUILD = "2.6";
   {
     const q = new URLSearchParams(window.location.search);
-    setFlags({ roll: !q.has("noroll"), field: q.has("field"), fastDwell: !q.has("nofastdwell") });
+    setFlags({ roll: !q.has("noroll"), field: !q.has("nofield"), fastDwell: !q.has("nofastdwell") });
   }
   var TRIAL_COUNT = 12;
   var SCROLL_PARAS = [
