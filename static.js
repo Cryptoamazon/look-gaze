@@ -23859,7 +23859,7 @@
   var Closing = (p) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("footer", { className: "file-closing", children: p.children });
 
   // ../gaze-app/src/engine.ts
-  var FLAGS = { roll: true, fastDwell: true, kbtune: true };
+  var FLAGS = { roll: true, fastDwell: true, kbtune: true, blinkhold: true };
   function setFlags(f) {
     Object.assign(FLAGS, f);
   }
@@ -24233,6 +24233,12 @@
       return Math.max(320, this.naturalP95() + 180);
     }
   };
+  var BLINK_HOLD_MS = 650;
+  function classifyBlinkGesture(durationMs, intentionalThresholdMs) {
+    if (durationMs >= BLINK_HOLD_MS) return "hold";
+    if (durationMs >= intentionalThresholdMs) return "select";
+    return "none";
+  }
   var IntentEngine = class _IntentEngine {
     constructor(dwellMs = 700, cooldownMs = 600, doubleBlinkWindowMs = 800) {
       this.dwellMs = dwellMs;
@@ -24434,13 +24440,13 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.11";
+  var BUILD = "2.12";
   var VPSCALE = !new URLSearchParams(window.location.search).has("novpscale");
   var NOINTENT = new URLSearchParams(window.location.search).has("nointent");
   var NODISTCOMP = new URLSearchParams(window.location.search).has("nodistcomp");
   {
     const q = new URLSearchParams(window.location.search);
-    setFlags({ roll: !q.has("noroll"), fastDwell: !q.has("nofastdwell"), kbtune: !q.has("nokbtune") });
+    setFlags({ roll: !q.has("noroll"), fastDwell: !q.has("nofastdwell"), kbtune: !q.has("nokbtune"), blinkhold: !q.has("noblinkhold") });
   }
   var TRIAL_COUNT = 12;
   var SCROLL_PARAS = [
@@ -24885,6 +24891,11 @@
           if (ev && ev.durationMs >= blinkTrackerRef.current.intentionalThresholdMs()) intentionalBlink = ev;
         } else if (demoBlinkQueueRef.current.length) {
           intentionalBlink = demoBlinkQueueRef.current.shift() || null;
+        }
+        if (modeRef.current === "keyboard" && FLAGS.blinkhold && intentionalBlink && classifyBlinkGesture(intentionalBlink.durationMs, blinkTrackerRef.current.intentionalThresholdMs()) === "hold") {
+          kbBackspace();
+          setLastAction("delete (blink-hold)");
+          intentionalBlink = null;
         }
         if (modeRef.current === "select" || modeRef.current === "keyboard") {
           let gv = gazeRef.current.valid;
