@@ -24440,7 +24440,7 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.13";
+  var BUILD = "2.14";
   var VPSCALE = !new URLSearchParams(window.location.search).has("novpscale");
   var NOINTENT = new URLSearchParams(window.location.search).has("nointent");
   var NODISTCOMP = new URLSearchParams(window.location.search).has("nodistcomp");
@@ -25201,7 +25201,7 @@
       labels.set(301, "space");
       targets.push({ id: 302, x: W * 0.82, y: top + 3 * keyR * 2.6, r: keyR });
       labels.set(302, "clear");
-      for (let j = 0; j < 3; j++) targets.push({ id: 200 + j, x: W * (0.2 + j * 0.3), y: H * 0.31, r: keyR + 6 });
+      for (let j = 0; j < 3; j++) targets.push({ id: 200 + j, x: W * (0.2 + j * 0.3), y: H * 0.31, r: keyR + 16 });
       targets.push({ id: 303, x: W - 40, y: 44, r: 26 });
       labels.set(303, "undo");
       kbLayoutRef.current = { targets, labels };
@@ -25486,7 +25486,7 @@
           /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-typed", children: typedText || /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "gaze-typed-placeholder", children: "look at the keys to type..." }) }),
           suggestions.map((w, j) => {
             const t = kbLayoutRef.current.targets.find((tt) => tt.id === 200 + j);
-            return t ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: kbHover === 200 + j ? "gaze-chip hovered" : "gaze-chip", style: { transform: `translate3d(${t.x - 52}px, ${t.y - 22}px, 0)` }, children: w }, j) : null;
+            return t ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: kbHover === 200 + j ? "gaze-chip hovered" : "gaze-chip", style: { transform: `translate3d(${t.x - 60}px, ${t.y - 28}px, 0)` }, children: w }, j) : null;
           }),
           kbLayoutRef.current.targets.filter((t) => t.id >= 100 && t.id < 200).map((t) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: kbHover === t.id ? "gaze-key hovered" : "gaze-key", style: { width: t.r * 1.7, height: t.r * 1.7, transform: `translate3d(${t.x - t.r * 0.85}px, ${t.y - t.r * 0.85}px, 0)` }, children: kbLayoutRef.current.labels.get(t.id) }, t.id)),
           [300, 301, 302].map((id) => {
