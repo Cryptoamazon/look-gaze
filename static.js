@@ -23886,12 +23886,12 @@
     if (lW < 1e-6 || rW < 1e-6) return { features: null, blink: false, confidence: 0 };
     const earL = d(lUp, lLo) / lW;
     const earR = d(rUp, rLo) / rW;
-    const blink = earL < 0.09 || earR < 0.09;
+    const blink = earL < 0.06 || earR < 0.06;
     if (blink) return { features: null, blink: true, confidence: 0.2 };
     const hxL = (lIris.x - lOuter.x) / (lInner.x - lOuter.x);
-    const hyL = (lIris.y - lUp.y) / (lLo.y - lUp.y);
+    const hyL = (lIris.y - (lUp.y + lLo.y) / 2) / lW;
     const hxR = (rIris.x - rInner.x) / (rOuter.x - rInner.x);
-    const hyR = (rIris.y - rUp.y) / (rLo.y - rUp.y);
+    const hyR = (rIris.y - (rUp.y + rLo.y) / 2) / rW;
     const faceW = d(cheekL, cheekR) || 1e-6;
     const faceH = d(forehead, chin) || 1e-6;
     const yaw = (nose.x - (cheekL.x + cheekR.x) / 2) / faceW;
@@ -23900,7 +23900,8 @@
     const poseMag = Math.max(Math.abs(yaw), Math.abs(pitch));
     const poseScore = Math.max(0, 1 - Math.max(0, poseMag - 0.05) * 6);
     const sizeScore = Math.max(0, Math.min(1, (faceW - 0.12) / 0.2));
-    const confidence = Math.max(0, Math.min(1, sym * 0.4 + poseScore * 0.35 + sizeScore * 0.25));
+    const openness = Math.max(0, Math.min(1, (Math.min(earL, earR) - 0.06) / 0.14));
+    const confidence = Math.max(0, Math.min(1, sym * 0.3 + poseScore * 0.3 + sizeScore * 0.2 + openness * 0.2));
     const pose = { yaw, pitch, faceW };
     const features = [
       1,
@@ -24016,7 +24017,7 @@
     }
   };
   var GazeFilter = class {
-    constructor(minCutoff = 0.9, beta = 0.15, dCutoff = 1) {
+    constructor(minCutoff = 1, beta = 0.05, dCutoff = 1) {
       this.minCutoff = minCutoff;
       this.beta = beta;
       this.dCutoff = dCutoff;
@@ -24033,6 +24034,8 @@
     // (blink saccades, detector jitter) without adding meaningful lag.
     xs = [];
     ys = [];
+    prevRawX = null;
+    prevRawY = null;
     median3(a) {
       const s = [...a].sort((p, q) => p - q);
       return s[1];
@@ -24049,6 +24052,8 @@
       this.lastT = null;
       this.xs = [];
       this.ys = [];
+      this.prevRawX = null;
+      this.prevRawY = null;
     }
     filter(x, y, tSec) {
       const dt = this.lastT === null ? 1 / 60 : Math.max(1e-3, tSec - this.lastT);
@@ -24059,8 +24064,10 @@
       if (this.ys.length > 3) this.ys.shift();
       x = this.xs.length === 3 ? this.median3(this.xs) : x;
       y = this.ys.length === 3 ? this.median3(this.ys) : y;
-      const dx = this.xLp.last() === null ? 0 : (x - this.xLp.last()) / dt;
-      const dy = this.yLp.last() === null ? 0 : (y - this.yLp.last()) / dt;
+      const dx = this.prevRawX === null ? 0 : (x - this.prevRawX) / dt;
+      const dy = this.prevRawY === null ? 0 : (y - this.prevRawY) / dt;
+      this.prevRawX = x;
+      this.prevRawY = y;
       const edx = this.dxLp.filter(dx, this.alpha(this.dCutoff, dt));
       const edy = this.dyLp.filter(dy, this.alpha(this.dCutoff, dt));
       const cutoffX = this.minCutoff + this.beta * Math.abs(edx);
@@ -24378,7 +24385,7 @@
     const demoMapRef = (0, import_react.useRef)(null);
     const calibIndexRef = (0, import_react.useRef)(0);
     const calibStateRef = (0, import_react.useRef)({ phase: "settle", t0: 0, collected: 0 });
-    const trialStateRef = (0, import_react.useRef)({ target: null, t0: 0, dwellT0: null, total: 0, valid: 0, minDist: Infinity, records: [], idx: 0, betweenT: null, confSum: 0 });
+    const trialStateRef = (0, import_react.useRef)({ target: null, t0: 0, dwellT0: null, total: 0, valid: 0, minDist: Infinity, records: [], idx: 0, betweenT: null, confSum: 0, lastHitT: 0 });
     (0, import_react.useEffect)(() => {
       modeRef.current = mode;
     }, [mode]);
@@ -24682,12 +24689,13 @@
               const hit = resolverRef.current.resolve(gx, gy, [ts.target], HIT_SLACK);
               const dist = Math.hypot(gx - ts.target.x, gy - ts.target.y);
               if (dist < ts.minDist) ts.minDist = dist;
+              if (hit) ts.lastHitT = now;
               if (hit && ts.dwellT0 === null) {
                 ts.dwellT0 = now;
                 dwellPtsRef.current = [];
               }
               if (hit && ts.dwellT0 !== null) dwellPtsRef.current.push({ x: gx, y: gy });
-              if (!hit) ts.dwellT0 = null;
+              if (!hit && ts.dwellT0 !== null && now - ts.lastHitT > 180) ts.dwellT0 = null;
               if (hit && ts.dwellT0 !== null && now - ts.dwellT0 >= DWELL_MS) {
                 finishTrial(true, now, dist);
               } else if (now - ts.t0 > TRIAL_TIMEOUT_MS) {
@@ -24728,6 +24736,8 @@
       ts.total = 0;
       ts.valid = 0;
       ts.minDist = Infinity;
+      ts.confSum = 0;
+      ts.lastHitT = 0;
     };
     const sampleLighting = () => {
       if (sourceRef.current !== "camera") return null;
@@ -24818,7 +24828,7 @@
       setFitError(null);
       setTrials([]);
       setSummary(null);
-      trialStateRef.current = { target: null, t0: 0, dwellT0: null, total: 0, valid: 0, minDist: Infinity, records: [], idx: 0, betweenT: null };
+      trialStateRef.current = { target: null, t0: 0, dwellT0: null, total: 0, valid: 0, minDist: Infinity, records: [], idx: 0, betweenT: null, confSum: 0 };
       blinkTrackerRef.current = new BlinkTracker();
       demoBlinkQueueRef.current = [];
       intentEngineRef.current.reset();
@@ -24992,7 +25002,7 @@
     };
     handleIntentRef.current = handleIntent;
     const startTrials = () => {
-      trialStateRef.current = { target: null, t0: 0, dwellT0: null, total: 0, valid: 0, minDist: Infinity, records: [], idx: 0, betweenT: performance.now() };
+      trialStateRef.current = { target: null, t0: 0, dwellT0: null, total: 0, valid: 0, minDist: Infinity, records: [], idx: 0, betweenT: performance.now(), confSum: 0 };
       setTrials([]);
       setMode("trials");
     };
@@ -25028,7 +25038,7 @@
       /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
         Header,
         {
-          title: "GLANYC - control your phone with your eyes (prototype, Phase 2.1)",
+          title: "GLANYC - control your phone with your eyes (prototype, Phase 2.2)",
           fact: "Camera to calibrated gaze cursor with dwell, blink, undo, scrolling, and a gaze keyboard - measured honestly",
           intro: "Research prototype for eye-controlled phone input: front camera, face and iris landmarks, 9-point calibration, filtered gaze cursor, dwell-to-select with a progress ring, blink-to-select with calibrated natural-vs-intentional timing, double-blink undo, gaze scrolling zones, and a gaze keyboard with word prediction. Tests log selection accuracy, false activations per minute, time-to-select, error distance, acquisition time, and tracking confidence. Everything runs on this device - the face model is built into the page itself, and no video, gaze, or typing ever leaves the phone."
         }
