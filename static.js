@@ -24247,10 +24247,11 @@
     cooldownMs;
     doubleBlinkWindowMs;
     dwellTargetId = null;
-    dwellStart = 0;
+    dwellAccumMs = 0;
+    dwellLastFrameT = 0;
     lastHitId = null;
     lastHitT = 0;
-    static dwellGraceMs = 180;
+    static dwellGraceMs = 350;
     intentionalBlinkTimes = [];
     pendingBlink = null;
     cooldownUntil = 0;
@@ -24260,7 +24261,10 @@
     }
     reset() {
       this.dwellTargetId = null;
-      this.dwellStart = 0;
+      this.dwellAccumMs = 0;
+      this.dwellLastFrameT = 0;
+      this.lastHitId = null;
+      this.lastHitT = 0;
       this.intentionalBlinkTimes = [];
       this.pendingBlink = null;
       this.cooldownUntil = 0;
@@ -24288,24 +24292,33 @@
       if (blinkEnd !== null && hit) {
         this.cooldownUntil = tMs + this.cooldownMs;
         this.dwellTargetId = null;
+        this.dwellAccumMs = 0;
         return { intent: { kind: "select", targetId: hit.id, via: "blink" }, dwellTargetId: null, dwellProgress: 0, inCooldown: false };
       }
-      if (hit) this.lastHitId = hit.id, this.lastHitT = tMs;
-      const effHit = hit || (this.dwellTargetId !== null && this.lastHitId === this.dwellTargetId && tMs - this.lastHitT < _IntentEngine.dwellGraceMs ? { id: this.dwellTargetId } : null);
-      if (effHit) {
-        if (this.dwellTargetId !== effHit.id) {
-          this.dwellTargetId = effHit.id;
-          this.dwellStart = tMs;
+      const frameDt = this.dwellLastFrameT > 0 ? Math.max(0, Math.min(50, tMs - this.dwellLastFrameT)) : 0;
+      this.dwellLastFrameT = tMs;
+      if (hit) {
+        this.lastHitId = hit.id;
+        this.lastHitT = tMs;
+        if (this.dwellTargetId !== hit.id) {
+          this.dwellTargetId = hit.id;
+          this.dwellAccumMs = 0;
         }
-        const prog = (tMs - this.dwellStart) / this.dwellMs;
-        if (prog >= 1 && hit) {
+        this.dwellAccumMs += frameDt;
+        const prog = this.dwellAccumMs / this.dwellMs;
+        if (prog >= 1) {
           this.cooldownUntil = tMs + this.cooldownMs;
           this.dwellTargetId = null;
-          return { intent: { kind: "select", targetId: effHit.id, via: "dwell" }, dwellTargetId: null, dwellProgress: 0, inCooldown: false };
+          this.dwellAccumMs = 0;
+          return { intent: { kind: "select", targetId: hit.id, via: "dwell" }, dwellTargetId: null, dwellProgress: 0, inCooldown: false };
         }
-        return { intent: null, dwellTargetId: effHit.id, dwellProgress: Math.max(0, Math.min(1, prog)), inCooldown: false };
+        return { intent: null, dwellTargetId: hit.id, dwellProgress: Math.max(0, Math.min(1, prog)), inCooldown: false };
+      }
+      if (this.dwellTargetId !== null && this.lastHitId === this.dwellTargetId && tMs - this.lastHitT <= _IntentEngine.dwellGraceMs) {
+        return { intent: null, dwellTargetId: this.dwellTargetId, dwellProgress: Math.max(0, Math.min(1, this.dwellAccumMs / this.dwellMs)), inCooldown: false };
       }
       this.dwellTargetId = null;
+      this.dwellAccumMs = 0;
       return { intent: null, dwellTargetId: null, dwellProgress: 0, inCooldown: false };
     }
   };
@@ -24403,7 +24416,7 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.10a";
+  var BUILD = "2.11-beta";
   var VPSCALE = !new URLSearchParams(window.location.search).has("novpscale");
   var NOINTENT = new URLSearchParams(window.location.search).has("nointent");
   var NODISTCOMP = new URLSearchParams(window.location.search).has("nodistcomp");
@@ -24504,6 +24517,7 @@
     const confEMARef = (0, import_react.useRef)(1);
     const lowSinceRef = (0, import_react.useRef)(null);
     const [lowTrack, setLowTrack] = (0, import_react.useState)(false);
+    const [selectionPaused, setSelectionPaused] = (0, import_react.useState)(false);
     const actionEngineRef = (0, import_react.useRef)(new ActionEngine());
     const demoBlinkStartRef = (0, import_react.useRef)(null);
     const demoBlinkQueueRef = (0, import_react.useRef)([]);
@@ -24857,6 +24871,12 @@
         if (modeRef.current === "select" || modeRef.current === "keyboard") {
           let gv = gazeRef.current.valid;
           if (intentionalBlink && !gv && now - gazeRef.current.lastValidT < 450) gv = true;
+          const qualityPaused = sourceRef.current === "camera" && (!gv || confEMARef.current < 0.72 || now - gazeRef.current.lastValidT > 350);
+          if (selectionPaused !== qualityPaused) setSelectionPaused(qualityPaused);
+          if (qualityPaused) {
+            gv = false;
+            intentEngineRef.current.reset();
+          }
           const targets = modeRef.current === "select" ? selectTargetsRef.current : kbLayoutRef.current.targets;
           let igx = gazeRef.current.x, igy = gazeRef.current.y;
           if (!NOINTENT && gv) {
@@ -25159,6 +25179,10 @@
       for (let j = 0; j < 3; j++) targets.push({ id: 200 + j, x: W * (0.2 + j * 0.3), y: H * 0.31, r: keyR + 6 });
       targets.push({ id: 303, x: W - 40, y: 44, r: 26 });
       labels.set(303, "undo");
+      targets.push({ id: 304, x: W * 0.28, y: H * 0.245, r: 34 });
+      labels.set(304, "copy");
+      targets.push({ id: 305, x: W * 0.72, y: H * 0.245, r: 34 });
+      labels.set(305, "text");
       kbLayoutRef.current = { targets, labels };
     };
     const currentWord = (text) => {
@@ -25173,9 +25197,47 @@
       kbSetText(typedTextRef.current.slice(0, -1));
       setLastAction("delete (undo)");
     };
+    const copyComposedText = async () => {
+      const text = typedTextRef.current;
+      if (!text) {
+        setLastAction("Type a message first");
+        return false;
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        let ok = false;
+        try { ok = document.execCommand("copy"); } catch {}
+        document.body.removeChild(ta);
+        if (!ok) {
+          setLastAction("Copy blocked - tap the message to select it");
+          return false;
+        }
+      }
+      setLastAction("Message copied");
+      return true;
+    };
+    const openMessages = async () => {
+      const text = typedTextRef.current;
+      if (!text) {
+        setLastAction("Type a message first");
+        return;
+      }
+      await copyComposedText();
+      setLastAction("Opening Messages - paste if body is blank");
+      window.location.href = `sms:&body=${encodeURIComponent(text)}`;
+    };
     const kbPress = (id, via) => {
       const labels = kbLayoutRef.current.labels;
       const text = typedTextRef.current;
+      if (id === 304) { copyComposedText(); return; }
+      if (id === 305) { openMessages(); return; }
       if (id >= 200 && id < 203) {
         const word = suggestionsRef.current[id - 200];
         if (!word) return;
@@ -25197,6 +25259,7 @@
       buildKeyboard();
       kbSetText("");
       setLastAction(null);
+      setSelectionPaused(false);
       setMode("keyboard");
     };
     const startScroll = () => {
@@ -25435,6 +25498,11 @@
             /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "gaze-quit", onClick: quitToIntro, children: "Quit" })
           ] }),
           /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-typed", children: typedText || /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "gaze-typed-placeholder", children: "look at the keys to type..." }) }),
+          selectionPaused && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-selection-paused", children: "Selection paused - look back at the screen" }),
+          [304, 305].map((id) => {
+            const t = kbLayoutRef.current.targets.find((tt) => tt.id === id);
+            return t ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: id === 305 ? "gaze-comm-action send" : "gaze-comm-action", style: { transform: `translate3d(${t.x - 58}px, ${t.y - 24}px, 0)` }, children: id === 305 ? "TEXT IN MESSAGES" : "COPY" }, id) : null;
+          }),
           suggestions.map((w, j) => {
             const t = kbLayoutRef.current.targets.find((tt) => tt.id === 200 + j);
             return t ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-chip", style: { transform: `translate3d(${t.x - 52}px, ${t.y - 22}px, 0)` }, children: w }, j) : null;
