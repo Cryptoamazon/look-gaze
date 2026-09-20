@@ -24293,7 +24293,7 @@
         this.cooldownUntil = tMs + this.cooldownMs;
         this.dwellTargetId = null;
         this.dwellAccumMs = 0;
-        return { intent: { kind: "select", targetId: hit.id, via: "blink" }, dwellTargetId: null, dwellProgress: 0, inCooldown: false };
+        return { intent: { kind: "select", targetId: hit.id, via: "blink", dwellMs: 0 }, dwellTargetId: null, dwellProgress: 0, inCooldown: false };
       }
       const frameDt = this.dwellLastFrameT > 0 ? Math.max(0, Math.min(50, tMs - this.dwellLastFrameT)) : 0;
       this.dwellLastFrameT = tMs;
@@ -24310,7 +24310,7 @@
           this.cooldownUntil = tMs + this.cooldownMs;
           this.dwellTargetId = null;
           this.dwellAccumMs = 0;
-          return { intent: { kind: "select", targetId: hit.id, via: "dwell" }, dwellTargetId: null, dwellProgress: 0, inCooldown: false };
+          return { intent: { kind: "select", targetId: hit.id, via: "dwell", dwellMs: this.dwellMs }, dwellTargetId: null, dwellProgress: 0, inCooldown: false };
         }
         return { intent: null, dwellTargetId: hit.id, dwellProgress: Math.max(0, Math.min(1, prog)), inCooldown: false };
       }
@@ -24416,7 +24416,7 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.11-beta";
+  var BUILD = "2.11a-beta";
   var VPSCALE = !new URLSearchParams(window.location.search).has("novpscale");
   var NOINTENT = new URLSearchParams(window.location.search).has("nointent");
   var NODISTCOMP = new URLSearchParams(window.location.search).has("nodistcomp");
@@ -24517,12 +24517,14 @@
     const confEMARef = (0, import_react.useRef)(1);
     const lowSinceRef = (0, import_react.useRef)(null);
     const [lowTrack, setLowTrack] = (0, import_react.useState)(false);
-    const [selectionPaused, setSelectionPaused] = (0, import_react.useState)(false);
+    const [selectionPauseReason, setSelectionPauseReason] = (0, import_react.useState)(null);
     const actionEngineRef = (0, import_react.useRef)(new ActionEngine());
     const demoBlinkStartRef = (0, import_react.useRef)(null);
     const demoBlinkQueueRef = (0, import_react.useRef)([]);
     const selectStateRef = (0, import_react.useRef)(null);
     const kbLayoutRef = (0, import_react.useRef)({ targets: [], labels: /* @__PURE__ */ new Map() });
+    const kbSessionRef = (0, import_react.useRef)({ startedAt: 0, events: [], corrections: 0, predictionPicks: 0, repeatsBlocked: 0, lastSelectedId: null, armed: true, exportedAt: null });
+    const [keyboardSummary, setKeyboardSummary] = (0, import_react.useState)(null);
     const scrollPxRef = (0, import_react.useRef)(0);
     const selectTargetsRef = (0, import_react.useRef)([]);
     const scrollBodyRef = (0, import_react.useRef)(null);
@@ -24871,9 +24873,10 @@
         if (modeRef.current === "select" || modeRef.current === "keyboard") {
           let gv = gazeRef.current.valid;
           if (intentionalBlink && !gv && now - gazeRef.current.lastValidT < 450) gv = true;
-          const qualityPaused = sourceRef.current === "camera" && (!gv || confEMARef.current < 0.72 || now - gazeRef.current.lastValidT > 350);
-          if (selectionPaused !== qualityPaused) setSelectionPaused(qualityPaused);
-          if (qualityPaused) {
+          const staleMs = now - gazeRef.current.lastValidT;
+          const pauseReason = sourceRef.current === "camera" ? !gv ? "tracking lost" : staleMs > 500 ? "gaze stale" : null : null;
+          if (selectionPauseReason !== pauseReason) setSelectionPauseReason(pauseReason);
+          if (pauseReason) {
             gv = false;
             intentEngineRef.current.reset();
           }
@@ -25145,6 +25148,7 @@
       setPromptedId(pid);
     };
     const startSelectTest = () => {
+      intentEngineRef.current.setDwellMs(450);
       intentEngineRef.current.reset();
       actionEngineRef.current.history = [];
       selectStateRef.current = { round: 0, promptedId: -1, t0: 0, records: [], falseCount: 0, sessionT0: performance.now() };
@@ -25183,6 +25187,10 @@
       labels.set(304, "copy");
       targets.push({ id: 305, x: W * 0.72, y: H * 0.245, r: 34 });
       labels.set(305, "text");
+      targets.push({ id: 306, x: W * 0.28, y: H * 0.91, r: 32 });
+      labels.set(306, "finish");
+      targets.push({ id: 307, x: W * 0.72, y: H * 0.91, r: 32 });
+      labels.set(307, "copy json");
       kbLayoutRef.current = { targets, labels };
     };
     const currentWord = (text) => {
@@ -25196,6 +25204,46 @@
     const kbBackspace = () => {
       kbSetText(typedTextRef.current.slice(0, -1));
       setLastAction("delete (undo)");
+    };
+    const keyboardPayload = () => {
+      const st = kbSessionRef.current;
+      const elapsedMs = Math.max(0, Math.round(performance.now() - st.startedAt));
+      const text = typedTextRef.current;
+      const chars = text.length;
+      const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+      return {
+        keyboardSummary: {
+          build: BUILD,
+          elapsedMs,
+          chars,
+          words,
+          charsPerMin: elapsedMs ? Math.round(chars / elapsedMs * 6e4 * 10) / 10 : 0,
+          wordsPerMin: elapsedMs ? Math.round(words / elapsedMs * 6e4 * 10) / 10 : 0,
+          selections: st.events.length,
+          corrections: st.corrections,
+          predictionPicks: st.predictionPicks,
+          repeatsBlocked: st.repeatsBlocked,
+          finalText: text,
+          source: sourceRef.current,
+          exportedAt: new Date().toISOString()
+        },
+        keyboardEvents: st.events
+      };
+    };
+    const finishKeyboardTest = () => {
+      const payload = keyboardPayload();
+      kbSessionRef.current.exportedAt = payload.keyboardSummary.exportedAt;
+      setKeyboardSummary(payload.keyboardSummary);
+      setLastAction(`Test finished: ${payload.keyboardSummary.charsPerMin} chars/min`);
+    };
+    const copyKeyboardJson = async () => {
+      const payload = JSON.stringify(keyboardPayload(), null, 2);
+      try {
+        await navigator.clipboard.writeText(payload);
+        setLastAction("Keyboard JSON copied");
+      } catch {
+        setLastAction("JSON copy blocked");
+      }
     };
     const copyComposedText = async () => {
       const text = typedTextRef.current;
@@ -25238,11 +25286,17 @@
       const text = typedTextRef.current;
       if (id === 304) { copyComposedText(); return; }
       if (id === 305) { openMessages(); return; }
+      if (id === 306) { finishKeyboardTest(); return; }
+      if (id === 307) { copyKeyboardJson(); return; }
+      const before = text;
       if (id >= 200 && id < 203) {
         const word = suggestionsRef.current[id - 200];
         if (!word) return;
         const w = currentWord(text);
-        kbSetText(text.slice(0, text.length - w.length) + word + " ");
+        const after = text.slice(0, text.length - w.length) + word + " ";
+        kbSetText(after);
+        kbSessionRef.current.predictionPicks++;
+        kbSessionRef.current.events.push({ t: Math.round(performance.now() - kbSessionRef.current.startedAt), targetId: id, label: word, via, dwellMs: via === "dwell" ? 320 : 0, confidence: Math.round(confRef.current * 100) / 100, rawX: Math.round(gazeRef.current.x), rawY: Math.round(gazeRef.current.y), before, after, kind: "prediction" });
         setLastAction(`+ "${word}" (${via})`);
         return;
       }
@@ -25252,14 +25306,20 @@
       else if (label === "delete") kbSetText(text.slice(0, -1));
       else if (label === "clear") kbSetText("");
       else kbSetText(text + label.toLowerCase());
+      const after = typedTextRef.current;
+      if (label === "delete" || label === "clear") kbSessionRef.current.corrections++;
+      kbSessionRef.current.events.push({ t: Math.round(performance.now() - kbSessionRef.current.startedAt), targetId: id, label, via, dwellMs: via === "dwell" ? 320 : 0, confidence: Math.round(confRef.current * 100) / 100, rawX: Math.round(gazeRef.current.x), rawY: Math.round(gazeRef.current.y), before, after: label === "space" ? text + " " : label === "delete" ? text.slice(0, -1) : label === "clear" ? "" : text + label.toLowerCase(), kind: "key" });
       setLastAction(`${label} (${via})`);
     };
     const startKeyboard = () => {
+      intentEngineRef.current.setDwellMs(320);
       intentEngineRef.current.reset();
       buildKeyboard();
       kbSetText("");
+      kbSessionRef.current = { startedAt: performance.now(), events: [], corrections: 0, predictionPicks: 0, repeatsBlocked: 0, lastSelectedId: null, armed: true, exportedAt: null };
+      setKeyboardSummary(null);
       setLastAction(null);
-      setSelectionPaused(false);
+      setSelectionPauseReason(null);
       setMode("keyboard");
     };
     const startScroll = () => {
@@ -25498,11 +25558,21 @@
             /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "gaze-quit", onClick: quitToIntro, children: "Quit" })
           ] }),
           /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-typed", children: typedText || /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "gaze-typed-placeholder", children: "look at the keys to type..." }) }),
-          selectionPaused && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-selection-paused", children: "Selection paused - look back at the screen" }),
+          selectionPauseReason && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "gaze-selection-paused", children: [
+            "Selection paused: ",
+            selectionPauseReason,
+            ". Look back at the screen."
+          ] }),
+          !selectionPauseReason && source === "camera" && confEMARef.current < 0.72 && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-quality-advisory", children: "Tracking quality low - selection stays active" }),
           [304, 305].map((id) => {
             const t = kbLayoutRef.current.targets.find((tt) => tt.id === id);
-            return t ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: id === 305 ? "gaze-comm-action send" : "gaze-comm-action", style: { transform: `translate3d(${t.x - 58}px, ${t.y - 24}px, 0)` }, children: id === 305 ? "TEXT IN MESSAGES" : "COPY" }, id) : null;
+            return t ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: id === 305 ? "gaze-comm-action send" : "gaze-comm-action", onClick: () => id === 305 ? openMessages() : copyComposedText(), style: { transform: `translate3d(${t.x - 58}px, ${t.y - 24}px, 0)` }, children: id === 305 ? "TEXT IN MESSAGES" : "COPY" }, id) : null;
           }),
+          [306, 307].map((id) => {
+            const t = kbLayoutRef.current.targets.find((tt) => tt.id === id);
+            return t ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "gaze-comm-action telemetry", onClick: () => id === 306 ? finishKeyboardTest() : copyKeyboardJson(), style: { transform: `translate3d(${t.x - 58}px, ${t.y - 24}px, 0)` }, children: id === 306 ? "FINISH TEST" : "COPY TEST JSON" }, id) : null;
+          }),
+          keyboardSummary && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "gaze-keyboard-summary", children: [keyboardSummary.charsPerMin, " chars/min | ", keyboardSummary.corrections, " corrections"] }),
           suggestions.map((w, j) => {
             const t = kbLayoutRef.current.targets.find((tt) => tt.id === 200 + j);
             return t ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gaze-chip", style: { transform: `translate3d(${t.x - 52}px, ${t.y - 22}px, 0)` }, children: w }, j) : null;

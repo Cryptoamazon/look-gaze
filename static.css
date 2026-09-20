@@ -367,3 +367,31 @@ button.gaze-link {
   text-align: center;
   font-weight: 700;
 }
+.gaze-quality-advisory {
+  position: absolute;
+  z-index: 19;
+  top: 7%;
+  left: 17%;
+  right: 17%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(165, 96, 0, 0.72);
+  text-align: center;
+  font-size: 13px;
+}
+.gaze-comm-action.telemetry {
+  min-height: 42px;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.gaze-keyboard-summary {
+  position: absolute;
+  z-index: 18;
+  left: 20%;
+  right: 20%;
+  bottom: 2%;
+  text-align: center;
+  font-size: 12px;
+  opacity: 0.85;
+}
