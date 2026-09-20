@@ -24403,7 +24403,7 @@
     };
     return mpFilesCache;
   }
-  var BUILD = "2.10";
+  var BUILD = "2.10a";
   var VPSCALE = !new URLSearchParams(window.location.search).has("novpscale");
   var NOINTENT = new URLSearchParams(window.location.search).has("nointent");
   var NODISTCOMP = new URLSearchParams(window.location.search).has("nodistcomp");
@@ -24430,6 +24430,7 @@
   ];
   var SELECT_ROUNDS = 10;
   var DWELL_MS = FLAGS.fastDwell ? 220 : 300;
+  var TRIAL_DWELL_GRACE_MS = 350;
   var TRIAL_TIMEOUT_MS = 8e3;
   var HIT_SLACK = 40;
   function loadScript(src) {
@@ -24518,7 +24519,7 @@
     const demoMapRef = (0, import_react.useRef)(null);
     const calibIndexRef = (0, import_react.useRef)(0);
     const calibStateRef = (0, import_react.useRef)({ phase: "settle", t0: 0, collected: 0 });
-    const trialStateRef = (0, import_react.useRef)({ target: null, t0: 0, dwellT0: null, total: 0, valid: 0, minDist: Infinity, records: [], idx: 0, betweenT: null, confSum: 0, lastHitT: 0 });
+    const trialStateRef = (0, import_react.useRef)({ target: null, t0: 0, dwellT0: null, dwellAccumMs: 0, dwellLastFrameT: 0, finishing: false, total: 0, valid: 0, minDist: Infinity, records: [], idx: 0, betweenT: null, confSum: 0, lastHitT: 0, hitFrames: 0, dwellResets: 0 });
     (0, import_react.useEffect)(() => {
       modeRef.current = mode;
     }, [mode]);
@@ -24920,14 +24921,24 @@
               const hit = resolverRef.current.resolve(mg.x, mg.y, [ts.target], HIT_SLACK);
               const dist = Math.hypot(gx - ts.target.x, gy - ts.target.y);
               if (dist < ts.minDist) ts.minDist = dist;
-              if (hit) ts.lastHitT = now;
-              if (hit && ts.dwellT0 === null) {
-                ts.dwellT0 = now;
+              const frameDt = ts.dwellLastFrameT > 0 ? Math.max(0, Math.min(50, now - ts.dwellLastFrameT)) : 0;
+              ts.dwellLastFrameT = now;
+              if (hit) {
+                ts.lastHitT = now;
+                ts.hitFrames++;
+                if (ts.dwellT0 === null) {
+                  ts.dwellT0 = now;
+                  dwellPtsRef.current = [];
+                }
+                ts.dwellAccumMs += frameDt;
+                dwellPtsRef.current.push({ x: gx, y: gy });
+              } else if (ts.dwellT0 !== null && now - ts.lastHitT > TRIAL_DWELL_GRACE_MS) {
+                ts.dwellT0 = null;
+                ts.dwellAccumMs = 0;
+                ts.dwellResets++;
                 dwellPtsRef.current = [];
               }
-              if (hit && ts.dwellT0 !== null) dwellPtsRef.current.push({ x: gx, y: gy });
-              if (!hit && ts.dwellT0 !== null && now - ts.lastHitT > 180) ts.dwellT0 = null;
-              if (hit && ts.dwellT0 !== null && now - ts.dwellT0 >= DWELL_MS) {
+              if (hit && ts.dwellT0 !== null && ts.dwellAccumMs >= DWELL_MS) {
                 finishTrial(true, now, dist);
               } else if (now - ts.t0 > TRIAL_TIMEOUT_MS) {
                 finishTrial(false, now, null);
@@ -24964,6 +24975,11 @@
       setActiveTarget(ts.target);
       ts.t0 = now;
       ts.dwellT0 = null;
+      ts.dwellAccumMs = 0;
+      ts.dwellLastFrameT = 0;
+      ts.finishing = false;
+      ts.hitFrames = 0;
+      ts.dwellResets = 0;
       ts.total = 0;
       ts.valid = 0;
       ts.minDist = Infinity;
@@ -24992,6 +25008,8 @@
     };
     const finishTrial = (hit, now, errAtAcquire) => {
       const ts = trialStateRef.current;
+      if (ts.finishing) return;
+      ts.finishing = true;
       const dp = dwellPtsRef.current;
       const predX = hit && dp.length ? Math.round(dp.reduce((s, p) => s + p.x, 0) / dp.length) : null;
       const predY = hit && dp.length ? Math.round(dp.reduce((s, p) => s + p.y, 0) / dp.length) : null;
@@ -25008,6 +25026,9 @@
         confidence: ts.total > 0 && isFinite(ts.confSum) ? Math.round(ts.confSum / ts.total * 100) / 100 : 0,
         validPct: ts.total > 0 ? Math.round(ts.valid / ts.total * 100) : 0,
         minDistancePx: ts.minDist === Infinity ? -1 : Math.round(ts.minDist),
+        hitFrames: ts.hitFrames,
+        accumulatedDwellMs: Math.round(ts.dwellAccumMs),
+        dwellResets: ts.dwellResets,
         headYaw: pose ? Math.round(pose.yaw * 1e3) / 1e3 : null,
         headPitch: pose ? Math.round(pose.pitch * 1e3) / 1e3 : null,
         cameraDistance: pose ? Math.round(pose.faceW * 1e3) / 1e3 : null,
@@ -25018,6 +25039,8 @@
       setTrials([...ts.records]);
       ts.idx++;
       if (ts.idx >= TRIAL_COUNT) {
+        ts.target = null;
+        setActiveTarget(null);
         const s = buildSummary(ts.records);
         setSummary(s);
         setLastSummary(s);
@@ -25236,7 +25259,7 @@
     };
     handleIntentRef.current = handleIntent;
     const startTrials = () => {
-      trialStateRef.current = { target: null, t0: 0, dwellT0: null, total: 0, valid: 0, minDist: Infinity, records: [], idx: 0, betweenT: performance.now(), confSum: 0 };
+      trialStateRef.current = { target: null, t0: 0, dwellT0: null, dwellAccumMs: 0, dwellLastFrameT: 0, finishing: false, total: 0, valid: 0, minDist: Infinity, records: [], idx: 0, betweenT: performance.now(), confSum: 0, lastHitT: 0, hitFrames: 0, dwellResets: 0 };
       setTrials([]);
       setMode("trials");
     };
